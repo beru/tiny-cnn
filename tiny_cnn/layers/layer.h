@@ -380,18 +380,24 @@ class layer : public node {
     }
 
     void forward(int worker_index) {
-        std::vector<tensor_t*> in_data, out_data;
+		thread_local std::vector<tensor_t*> in_data, out_data;
 
+		if (in_data.size() < in_channels_) {
+			in_data.resize(in_channels_);
+		}
         // organize input/output vectors from storage
         for (cnn_size_t i = 0; i < in_channels_; i++) {
-            in_data.push_back(ith_in_node(i)->get_data(worker_index));
+            in_data[i] = ith_in_node(i)->get_data(worker_index);
         }
 
         // resize outs and stuff to have room for every input sample in the batch
         set_sample_count(in_data[0]->size(), worker_index);
 
+		if (out_data.size() < out_channels_) {
+			out_data.resize(out_channels_);
+		}
         for (cnn_size_t i = 0; i < out_channels_; i++) {
-            out_data.push_back(ith_out_node(i)->get_data(worker_index));
+            out_data[i] = ith_out_node(i)->get_data(worker_index);
             ith_out_node(i)->clear_grad_onwork(worker_index);
         }
 
@@ -399,20 +405,32 @@ class layer : public node {
     }
 
     void backward(int worker_index) {
-        std::vector<tensor_t*> in_data, out_data, in_grad, out_grad;
+        thread_local std::vector<tensor_t*> in_data, out_data, in_grad, out_grad;
 
-        // organize input/output vectors from storage
+		if (in_data.size() < in_channels_) {
+			in_data.resize(in_channels_);
+		}
+		if (in_grad.size() < in_channels_) {
+			in_grad.resize(in_channels_);
+		}
+		if (out_data.size() < out_channels_) {
+			out_data.resize(out_channels_);
+		}
+		if (out_grad.size() < out_channels_) {
+			out_grad.resize(out_channels_);
+		}
+		// organize input/output vectors from storage
         for (cnn_size_t i = 0; i < in_channels_; i++) {
-            in_data.push_back(ith_in_node(i)->get_data(worker_index));
+            in_data[i] = ith_in_node(i)->get_data(worker_index);
         }
         for (cnn_size_t i = 0; i < out_channels_; i++) {
-            out_data.push_back(ith_out_node(i)->get_data(worker_index));
+            out_data[i] = ith_out_node(i)->get_data(worker_index);
         }
         for (cnn_size_t i = 0; i < in_channels_; i++) {
-            in_grad.push_back(ith_in_node(i)->get_gradient(worker_index));
+            in_grad[i] = ith_in_node(i)->get_gradient(worker_index);
         }
         for (cnn_size_t i = 0; i < out_channels_; i++) {
-            out_grad.push_back(ith_out_node(i)->get_gradient(worker_index));
+            out_grad[i] = ith_out_node(i)->get_gradient(worker_index);
         }
         back_propagation(worker_index, in_data, out_data, out_grad, in_grad);
     }
