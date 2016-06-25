@@ -95,8 +95,8 @@ public:
     }
 
     void forward_propagation(cnn_size_t index,
-                             const std::vector<tensor_t*>& in_data,
-                             std::vector<tensor_t*>&       out_data)  override {
+                             const tensor_t** in_data,
+                             tensor_t**       out_data)  override {
 
         // @todo revise the parallelism strategy
         for (cnn_size_t sample = 0, sample_count = in_data.size(); sample < sample_count; ++sample) {
@@ -129,10 +129,10 @@ public:
     }
 
     void back_propagation(cnn_size_t                    index,
-                          const std::vector<tensor_t*>& in_data,
-                          const std::vector<tensor_t*>& out_data,
-                          std::vector<tensor_t*>&       out_grad,
-                          std::vector<tensor_t*>&       in_grad) override {
+                          const tensor_t** in_data,
+                          const tensor_t** out_data,
+                          tensor_t**       out_grad,
+                          tensor_t**       in_grad) override {
         tensor_t& prev_delta = *in_grad[0];
         tensor_t& curr_delta = *out_grad[1];
         std::vector<cnn_size_t>& max_idx = max_pooling_layer_worker_storage_[index].out2inmax_;

@@ -184,8 +184,8 @@ public:
     }
 
     void forward_propagation(cnn_size_t worker_index,
-                             const std::vector<tensor_t*>& in_data,
-                             std::vector<tensor_t*>& out_data) override {
+                             const tensor_t** in_data,
+                             tensor_t** out_data) override {
 
         deconv_layer_worker_specific_storage& cws = deconv_layer_worker_storage_[worker_index];
 
@@ -255,10 +255,10 @@ public:
     }
 
     void back_propagation(cnn_size_t                    worker_index,
-                          const std::vector<tensor_t*>& in_data,
-                          const std::vector<tensor_t*>& out_data,
-                          std::vector<tensor_t*>&       out_grad,
-                          std::vector<tensor_t*>&       in_grad) override {
+                          const tensor_t** in_data,
+                          const tensor_t** out_data,
+                          tensor_t**       out_grad,
+                          tensor_t**       in_grad) override {
 
         deconv_layer_worker_specific_storage& cws = deconv_layer_worker_storage_[worker_index];
 

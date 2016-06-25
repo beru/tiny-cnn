@@ -332,8 +332,8 @@ class layer : public node {
      * @param out_data     output vectors
      **/
     virtual void forward_propagation(cnn_size_t worker_index,
-                                     const std::vector<tensor_t*>& in_data,
-                                     std::vector<tensor_t*>& out_data) = 0;
+                                     const tensor_t** in_data,
+                                     tensor_t** out_data) = 0;
 
     /**
      * return delta of previous layer (delta=\frac{dE}{da}, a=wx in fully-connected layer)
@@ -344,10 +344,10 @@ class layer : public node {
      * @param in_grad      gradient of input vectors (i-th vector correspond with in_data[i])
      **/
     virtual void back_propagation(cnn_size_t                    worker_index,
-                                  const std::vector<tensor_t*>& in_data,
-                                  const std::vector<tensor_t*>& out_data,
-                                  std::vector<tensor_t*>&       out_grad,
-                                  std::vector<tensor_t*>&       in_grad) = 0;
+                                  const tensor_t** in_data,
+                                  const tensor_t** out_data,
+                                  tensor_t**       out_grad,
+                                  tensor_t**       in_grad) = 0;
 
     /**
      * return delta2 of previous layer (delta2=\frac{d^2E}{da^2}, diagonal of hessian matrix)
@@ -380,11 +380,10 @@ class layer : public node {
     }
 
     void forward(int worker_index) {
-		thread_local std::vector<tensor_t*> in_data, out_data;
-
-		if (in_data.size() < in_channels_) {
-			in_data.resize(in_channels_);
-		}
+		const tensor_t* in_data[16];
+		tensor_t* out_data[16];
+		assert(in_channels_ <= 16);
+		assert(out_channels_ <= 16);
         // organize input/output vectors from storage
         for (cnn_size_t i = 0; i < in_channels_; i++) {
             in_data[i] = ith_in_node(i)->get_data(worker_index);
@@ -393,9 +392,6 @@ class layer : public node {
         // resize outs and stuff to have room for every input sample in the batch
         set_sample_count(in_data[0]->size(), worker_index);
 
-		if (out_data.size() < out_channels_) {
-			out_data.resize(out_channels_);
-		}
         for (cnn_size_t i = 0; i < out_channels_; i++) {
             out_data[i] = ith_out_node(i)->get_data(worker_index);
             ith_out_node(i)->clear_grad_onwork(worker_index);
@@ -405,20 +401,12 @@ class layer : public node {
     }
 
     void backward(int worker_index) {
-        thread_local std::vector<tensor_t*> in_data, out_data, in_grad, out_grad;
-
-		if (in_data.size() < in_channels_) {
-			in_data.resize(in_channels_);
-		}
-		if (in_grad.size() < in_channels_) {
-			in_grad.resize(in_channels_);
-		}
-		if (out_data.size() < out_channels_) {
-			out_data.resize(out_channels_);
-		}
-		if (out_grad.size() < out_channels_) {
-			out_grad.resize(out_channels_);
-		}
+		const tensor_t* in_data[16];
+		const tensor_t* out_data[16];
+		tensor_t* in_grad[16];
+		tensor_t* out_grad[16];
+		assert(in_channels_ <= 16);
+		assert(out_channels_ <= 16);
 		// organize input/output vectors from storage
         for (cnn_size_t i = 0; i < in_channels_; i++) {
             in_data[i] = ith_in_node(i)->get_data(worker_index);

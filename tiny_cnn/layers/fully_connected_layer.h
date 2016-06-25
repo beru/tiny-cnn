@@ -69,8 +69,8 @@ public:
     }
 
     void forward_propagation(cnn_size_t index,
-                             const std::vector<tensor_t*>& in_data,
-                             std::vector<tensor_t*>& out_data) override {
+                             const tensor_t** in_data,
+                             tensor_t** out_data) override {
         const vec_t&    W   = (*in_data[1])[0];
 
         CNN_UNREFERENCED_PARAMETER(index);
@@ -91,7 +91,7 @@ public:
                 }
 
                 if (has_bias_) {
-                    vec_t& b = (*in_data[2])[0];
+                    const vec_t& b = (*in_data[2])[0];
                     a[i] += b[i];
                 }
             });
@@ -103,10 +103,10 @@ public:
     }
 
     void back_propagation(cnn_size_t                    index,
-                          const std::vector<tensor_t*>& in_data,
-                          const std::vector<tensor_t*>& out_data,
-                          std::vector<tensor_t*>&       out_grad,
-                          std::vector<tensor_t*>&       in_grad) override {
+                          const tensor_t** in_data,
+                          const tensor_t** out_data,
+                          tensor_t**       out_grad,
+                          tensor_t**       in_grad) override {
         const tensor_t& prev_out = *in_data[0];
         const vec_t& W           = (*in_data[1])[0];
         tensor_t&    dW          = *in_grad[1];
