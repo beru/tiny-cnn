@@ -1,0 +1,33 @@
+
+network
+	train_onebatch
+	fprop
+	bprop
+	predict
+	train
+	normalize_tensor
+	fit
+	check_target_cost_matrix
+	
+gradient
+apply_cost_if_defined
+
+nodes
+	reorder_for_layerwise_processing
+	backward
+	forward
+	
+sequential
+	backward
+	forward
+	normalize_out
+
+graph
+    backward
+    forward
+    merge_outs
+	
+layer
+	set_in_data
+	output
+
