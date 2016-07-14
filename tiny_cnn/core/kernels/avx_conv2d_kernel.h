@@ -110,7 +110,7 @@ void avx_conv2d_3x3_kernel(const conv_params& params,
             }
         }
     } else {
-        const size_t nblocks = out.width_ / 4;
+        const size_t nblocks = out.width_ / 8;
         for (size_t o = 0; o < out.depth_; ++o, oidx += out_area) {
             float* pa = &a[oidx];
             // init to bias value
@@ -164,21 +164,14 @@ abc abc
   2   6
    3   7
 */
-                __m256 w0a = _mm256_and_ps(_mm256_loadu_ps(pw+0), mask);
-                __m256 w1a = _mm256_and_ps(_mm256_loadu_ps(pw+3), mask);
-                __m256 w2a = _mm256_and_ps(_mm256_loadu_ps(pw+6), mask);
-                __m256 w0b = leftShift<4>(w0a);
-                __m256 w1b = leftShift<4>(w1a);
-                __m256 w2b = leftShift<4>(w2a);
-                __m256 w0c = leftShift<8>(w0a);
-                __m256 w1c = leftShift<8>(w1a);
-                __m256 w2c = leftShift<8>(w2a);
-                __m256 w0d = leftShift<12>(w0a);
-                __m256 w1d = leftShift<12>(w1a);
-                __m256 w2d = leftShift<12>(w2a);
-                // 01234567
-                // 01234567
-                // 01234567
+                const __m256 w0 = _mm256_broadcast_ps((const __m128*)(pw+0));
+                const __m256 w1 = _mm256_broadcast_ps((const __m128*)(pw+3));
+                const __m256 w2 = _mm256_broadcast_ps((const __m128*)(pw+6));
+                const __m256 w0a = leftShift<4>(w0);
+                const __m256 w1a = leftShift<4>(w1);
+                const __m256 w2a = leftShift<4>(w2);
+                const __m256 mask0 = _mm256_setr_ps(1,1,1,0,1,1,1,0);
+                const __m256 mask1 = _mm256_setr_ps(0,1,1,1,0,1,1,1);
                 float* ppa = pa;
                 for (cnn_size_t y = 0; y < out.height_; y++) {
                     const float* pi0 = (pi + y * stride);
@@ -186,36 +179,40 @@ abc abc
                     const float* pi2 = pi0 + 2 * stride;
                     cnn_size_t x = 0;
                     if (w_stride == 1) {
-                        __m256 dst0, dst1, dst2, dst3;
+                        __m256 dst04, dst15, dst26, dst37;
                         float* ppa2 = ppa;
                         for (size_t i = 0; i < nblocks; ++i) {
                             __m256 i0 = _mm256_loadu_ps(pi0);
                             __m256 i1 = _mm256_loadu_ps(pi1);
                             __m256 i2 = _mm256_loadu_ps(pi2);
-                            __m128 sum = _mm_loadu_ps(ppa2);
-                            dst0 = _mm256_mul_ps(w0a, i0);
-                            dst1 = _mm256_mul_ps(w0b, i0);
-                            dst2 = _mm256_mul_ps(w0c, i0);
-                            dst3 = _mm256_mul_ps(w0d, i0);
-                            dst0 = madd(w1a, i1, dst0);
-                            dst1 = madd(w1b, i1, dst1);
-                            dst2 = madd(w1c, i1, dst2);
-                            dst3 = madd(w1d, i1, dst3);
-                            dst0 = madd(w2a, i2, dst0);
-                            dst1 = madd(w2b, i2, dst1);
-                            dst2 = madd(w2c, i2, dst2);
-                            dst3 = madd(w2d, i2, dst3);
-                            __m128 hsum01 = hsum2x256_ps(dst0, dst1);
-                            __m128 hsum23 = hsum2x256_ps(dst2, dst3);
-                            __m128 sum2 = _mm_castpd_ps(_mm_unpacklo_pd(_mm_castps_pd(hsum01), _mm_castps_pd(hsum23)));
-                            sum = _mm_add_ps(sum, sum2);
-                            _mm_storeu_ps(ppa2, sum);
-                            pi0 += 4;
-                            pi1 += 4;
-                            pi2 += 4;
-                            ppa2 += 4;
+                            __m256 i0a = _mm256_loadu_ps(pi0+2);
+                            __m256 i1a = _mm256_loadu_ps(pi0+2);
+                            __m256 i2a = _mm256_loadu_ps(pi0+2);
+                            __m256 sum = _mm256_loadu_ps(ppa2);
+                            dst04 = _mm256_mul_ps(w0, i0);
+                            dst04 = madd(w1, i1, dst04);
+                            dst04 = madd(w2, i2, dst04);
+                            dst15 = _mm256_mul_ps(w0a, i0);
+                            dst15 = madd(w1a, i1, dst15);
+                            dst15 = madd(w2a, i2, dst15);
+                            dst26 = _mm256_mul_ps(w0, i0a);
+                            dst26 = madd(w1, i1a, dst26);
+                            dst26 = madd(w2, i2a, dst26);
+                            dst37 = _mm256_mul_ps(w0a, i0a);
+                            dst37 = madd(w1a, i1a, dst37);
+                            dst37 = madd(w2a, i2a, dst37);
+                            dst04 = _mm256_dp_ps(dst04, mask0, 0x71 /* 0b01110001 */);
+                            dst15 = _mm256_dp_ps(dst15, mask1, 0xE2 /* 0b11100010 */);
+                            dst26 = _mm256_dp_ps(dst26, mask0, 0x74 /* 0b01110100 */);
+                            dst37 = _mm256_dp_ps(dst37, mask1, 0xE8 /* 0b11101000 */);
+                            sum = _mm256_add_ps(_mm256_add_ps(dst04, dst15), _mm256_add_ps(dst26, dst37));
+                            _mm256_storeu_ps(ppa2, sum);
+                            pi0 += 8;
+                            pi1 += 8;
+                            pi2 += 8;
+                            ppa2 += 8;
                         }
-                        x = nblocks * 4;
+                        x = nblocks * 8;
                     }
                     for (; x < out.width_; ++x) {
                         __m128 sum = _mm_load_ss(&ppa[x]);
@@ -682,7 +679,10 @@ inline void avx_conv2d_kernel(const conv_params& params,
                               vec_t&       a,
                               const bool   layer_parallelize) {
     
-    if (params.weight.height_ == 5 && params.weight.width_ == 5) {
+    if (params.weight.height_ == 3 && params.weight.width_ == 3) {
+        avx_conv2d_3x3_kernel(params, in, W, bias, a, layer_parallelize);
+        return;
+    }else if (params.weight.height_ == 5 && params.weight.width_ == 5) {
         avx_conv2d_5x5_kernel(params, in, W, bias, a, layer_parallelize);
         return;
     }
