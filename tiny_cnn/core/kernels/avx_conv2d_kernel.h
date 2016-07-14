@@ -36,6 +36,211 @@ namespace kernels {
 
 // float ver
 template <typename Allocator>
+void avx_conv2d_3x3_kernel(const conv_params& params,
+                           const std::vector<float, Allocator>& in,
+                           const std::vector<float, Allocator>& W,
+                           const std::vector<float, Allocator>& bias,
+                           std::vector<float, Allocator>&       a,
+                           const bool layer_parallelize) {
+    assert(params.weight.height_ == 3 && params.weight.width_ == 3 && params.weight.area() == 9);
+    
+    auto& out       = params.out;
+    auto& in_padded = params.in_padded;
+    auto& tbl       = params.tbl;
+    auto  w_stride  = params.w_stride;
+    
+    const size_t out_area = out.area();
+    cnn_size_t oidx = 0;
+    float bias_scale = params.has_bias ? 1.0f : 0.0f;
+    const size_t stride = params.h_stride * in_padded.width_;
+    const size_t inarea = in_padded.area();
+
+    static const __m256 mask = _mm256_castsi256_ps(_mm256_setr_epi32(-1, -1, -1, -1, -1, 0, 0, 0));
+    const __m128 y_bias_scale = _mm_set_ss(bias_scale);
+    if (out.height_ == 1 && out.width_ == 1) {
+        if (stride == 3) {
+            const float* pw = (const float*) &W[0];
+            for (size_t o=0; o<out.depth_; ++o) {
+                __m256 sum0 = _mm256_setzero_ps();
+                __m128 sum1 = _mm_setzero_ps();
+                const float* pi = (const float*) &in[0];
+                for (cnn_size_t inc = 0; inc < params.in.depth_; ++inc, pw += 9, pi += inarea) {
+                    if (!tbl.is_connected(o, inc)) {
+                        continue;
+                    }
+                    __m256 w0 = _mm256_loadu_ps(pw+0);
+                    __m256 i0 = _mm256_loadu_ps(pi+0);
+                    __m128 w1 = _mm_load_ss(pw+8);
+                    __m128 i1 = _mm_load_ss(pi+8);
+                    __m256 tmp0 = _mm256_mul_ps(w0, i0);
+                    __m128 tmp1 = _mm_mul_ps(w1, i1);
+                    sum0 = _mm256_add_ps(tmp0, sum0);
+                    sum1 = _mm_add_ps(tmp1, sum1);
+                }
+                __m128 b = _mm_load_ss(&bias[o]);
+                __m128 hsum = hsum256_ps(sum0);
+                b = madd_ss(b, y_bias_scale, sum1);
+                _mm_store_ss(&a[o], _mm_add_ss(hsum, b));
+            }
+        } else {
+            for (size_t o = 0; o < out.depth_; ++o) {
+                __m256 sum = _mm256_setzero_ps();
+                size_t widx = 9/* params.weight.area() */ * params.in.depth_ * o;
+                size_t inidx = 0;
+                for (cnn_size_t inc = 0; inc < params.in.depth_; ++inc, widx += 9, inidx += inarea) {
+                    if (!tbl.is_connected(o, inc)) {
+                        continue;
+                    }
+                    const float* pw = (const float*) &W[widx];
+                    __m256 w0 = _mm256_loadu_ps(pw+0);
+                    __m128 w1 = _mm_load_ss(pw+8);
+                    const float* pi = (const float*) &in[inidx];
+                    __m256 i0 = _mm256_loadu_ps(pi + 0 * stride);
+                    __m256 i1 = _mm256_loadu_ps(pi + 1 * stride);
+                    __m256 i2 = _mm256_loadu_ps(pi + 2 * stride);
+                    __m256 sum0 = madd(w0, i0, sum);
+                    __m256 sum1 = _mm256_mul_ps(w1, i1);
+                    sum0 = madd(w2, i2, sum0);
+                    sum = _mm256_add_ps(sum0, sum1);
+                }
+                __m128 b = _mm_load_ss(&bias[o]);
+                __m128 hsum = hsum256_ps(sum);
+                hsum = madd(b, y_bias_scale, hsum);
+                _mm_store_ss(&a[o], hsum);
+            }
+        }
+    } else {
+        const size_t nblocks = out.width_ / 4;
+        for (size_t o = 0; o < out.depth_; ++o, oidx += out_area) {
+            float* pa = &a[oidx];
+            // init to bias value
+            float b = bias[o] * bias_scale;
+            {
+                size_t headSize = 0;
+                __m256 b2 = _mm256_set1_ps(b);
+                if (oidx & 7) {
+                    headSize = 8 - (oidx & 7);
+                    assert(headSize < out_area);
+                    for (size_t i=0; i<headSize; ++i) {
+                        _mm_store_ss(&pa[i], _mm256_castps256_ps128(b2));
+                    }
+                }
+                size_t cnt = (out_area - headSize) / 16;
+                float* pa2 = pa + headSize;
+                for (size_t i=0; i<cnt; ++i) {
+                    _mm256_store_ps(&pa2[i*16+0], b2);
+                    _mm256_store_ps(&pa2[i*16+8], b2);
+                }
+                for (size_t i=headSize+cnt*16; i<out_area; ++i) {
+                    pa[i] = b;
+                }
+            }
+            for (cnn_size_t inc = 0; inc < params.in.depth_; ++inc) {
+                if (!tbl.is_connected(o, inc)) continue;
+
+                const float* pw = (const float*) &W[9 * (params.in.depth_ * o + inc)];
+                const float* pi = (const float*) &in[in_padded.get_index(0, 0, inc)];
+/*
+== Weight
+abc abc
+ abc abc
+
+== Input
+01234567
+01234567
+== Input Shifted
+23456789
+23456789
+
+== W * I
+012 456
+ 123 567
+234 678
+ 345 789
+
+== vdpps
+0   4
+ 1   5
+  2   6
+   3   7
+*/
+                __m256 w0a = _mm256_and_ps(_mm256_loadu_ps(pw+0), mask);
+                __m256 w1a = _mm256_and_ps(_mm256_loadu_ps(pw+3), mask);
+                __m256 w2a = _mm256_and_ps(_mm256_loadu_ps(pw+6), mask);
+                __m256 w0b = leftShift<4>(w0a);
+                __m256 w1b = leftShift<4>(w1a);
+                __m256 w2b = leftShift<4>(w2a);
+                __m256 w0c = leftShift<8>(w0a);
+                __m256 w1c = leftShift<8>(w1a);
+                __m256 w2c = leftShift<8>(w2a);
+                __m256 w0d = leftShift<12>(w0a);
+                __m256 w1d = leftShift<12>(w1a);
+                __m256 w2d = leftShift<12>(w2a);
+                // 01234567
+                // 01234567
+                // 01234567
+                float* ppa = pa;
+                for (cnn_size_t y = 0; y < out.height_; y++) {
+                    const float* pi0 = (pi + y * stride);
+                    const float* pi1 = pi0 + 1 * stride;
+                    const float* pi2 = pi0 + 2 * stride;
+                    cnn_size_t x = 0;
+                    if (w_stride == 1) {
+                        __m256 dst0, dst1, dst2, dst3;
+                        float* ppa2 = ppa;
+                        for (size_t i = 0; i < nblocks; ++i) {
+                            __m256 i0 = _mm256_loadu_ps(pi0);
+                            __m256 i1 = _mm256_loadu_ps(pi1);
+                            __m256 i2 = _mm256_loadu_ps(pi2);
+                            __m128 sum = _mm_loadu_ps(ppa2);
+                            dst0 = _mm256_mul_ps(w0a, i0);
+                            dst1 = _mm256_mul_ps(w0b, i0);
+                            dst2 = _mm256_mul_ps(w0c, i0);
+                            dst3 = _mm256_mul_ps(w0d, i0);
+                            dst0 = madd(w1a, i1, dst0);
+                            dst1 = madd(w1b, i1, dst1);
+                            dst2 = madd(w1c, i1, dst2);
+                            dst3 = madd(w1d, i1, dst3);
+                            dst0 = madd(w2a, i2, dst0);
+                            dst1 = madd(w2b, i2, dst1);
+                            dst2 = madd(w2c, i2, dst2);
+                            dst3 = madd(w2d, i2, dst3);
+                            __m128 hsum01 = hsum2x256_ps(dst0, dst1);
+                            __m128 hsum23 = hsum2x256_ps(dst2, dst3);
+                            __m128 sum2 = _mm_castpd_ps(_mm_unpacklo_pd(_mm_castps_pd(hsum01), _mm_castps_pd(hsum23)));
+                            sum = _mm_add_ps(sum, sum2);
+                            _mm_storeu_ps(ppa2, sum);
+                            pi0 += 4;
+                            pi1 += 4;
+                            pi2 += 4;
+                            ppa2 += 4;
+                        }
+                        x = nblocks * 4;
+                    }
+                    for (; x < out.width_; ++x) {
+                        __m128 sum = _mm_load_ss(&ppa[x]);
+                        __m256 i0 = _mm256_loadu_ps(pi0);
+                        __m256 i1 = _mm256_loadu_ps(pi1);
+                        __m256 i2 = _mm256_loadu_ps(pi2);
+                        __m256 sum0 = _mm256_mul_ps(w0a, i0);
+                        __m256 sum1 = _mm256_mul_ps(w1a, i1);
+                        sum0 = madd(w2a, i2, sum0);
+                        sum0 = _mm256_add_ps(sum0, sum1);
+                        _mm_store_ss(&ppa[x], _mm_add_ss(sum, hsum256_ps(sum0)));
+//                      printf("%d %d %d %f\n", inc, y, x, ppa[x]);
+                        pi0 += w_stride;
+                        pi1 += w_stride;
+                        pi2 += w_stride;
+                    } // x loop
+                    ppa += out.width_;
+                } // y loop
+            } // in depth loop
+        } // out depth loop
+    } // else
+}
+
+// float ver
+template <typename Allocator>
 void avx_conv2d_5x5_kernel(const conv_params& params,
                            const std::vector<float, Allocator>& in,
                            const std::vector<float, Allocator>& W,

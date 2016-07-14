@@ -109,10 +109,10 @@ void DeAE(network<sequential>& nn,
     std::vector<vec_t> test_images) {
 
     // construct nets
-    nn << convolutional_layer<tan_h>(32, 32, 5, 1, 18)  // C1, 1@32x32-in, 6@32x32-out
-       << average_pooling_layer<tan_h>(28, 28, 18, 2)   // S2, 6@28x28-in, 6@14x14-out
-       << average_unpooling_layer<tan_h>(14, 14, 18, 2) // U3, 6@14x14-in, 6@28x28-out
-       << deconvolutional_layer<tan_h>(28, 28, 5, 18, 3); // D4, 6@28x28-in, 16@32x32-out
+    nn << convolutional_layer<tan_h>(32, 32, 5, 1, 18)  // C1, 1@32x32-in, 18@28x28-out
+       << average_pooling_layer<tan_h>(28, 28, 18, 2)   // S2, 18@28x28-in, 18@14x14-out
+       << average_unpooling_layer<tan_h>(14, 14, 18, 2) // U3, 18@14x14-in, 18@28x28-out
+       << deconvolutional_layer<tan_h>(28, 28, 5, 18, 3); // D4, 18@28x28-in, 3@32x32-out
 
     // load train-data and make corruption
 
