@@ -196,7 +196,7 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
             const __m256 mask2 = mask;
             if (tbl.is_empty()) {
                 for (cnn_size_t outc = 0; outc < out.depth_; outc++, widx+=wstep) {
-                    __m256 delta_src = _mm256_and_ps(_mm256_broadcast_ss(&curr_delta[outc]), mask2);
+                    __m256 delta_src = _mm256_broadcast_ss(&curr_delta[outc]);
                     const float* pw = (const float*)&W[widx];
                     __m256 w0 = _mm256_loadu_ps(pw+0);
                     __m256 w1 = _mm256_loadu_ps(pw+8);
@@ -212,7 +212,7 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
                     if (!tbl.is_connected(outc, inc)) {
                         continue;
                     }
-                    __m256 delta_src = _mm256_and_ps(_mm256_broadcast_ss(&curr_delta[outc]), mask2);
+                    __m256 delta_src = _mm256_broadcast_ss(&curr_delta[outc]);
                     const float* pw = (const float*)&W[widx];
                     __m256 w0 = _mm256_loadu_ps(pw+0);
                     __m256 w1 = _mm256_loadu_ps(pw+8);
