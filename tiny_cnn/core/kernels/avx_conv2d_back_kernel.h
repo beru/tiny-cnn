@@ -54,6 +54,43 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
     static const __m256 mask = _mm256_castsi256_ps(_mm256_setr_epi32(-1, -1, -1, -1, -1, 0, 0, 0));
     // propagate delta to previous layer
     if (w_stride == 1 && out.width_ >= 4) {
+/*
+s 4
+	0123 0123
+	
+	0000 0000
+	1111 1111
+	2222 2222
+	3333 3333
+	
+w 5*5
+	01234---
+	01234---
+	01234---
+	01234---
+
+	-01234--
+	-01234--
+	-01234--
+	-01234--
+	
+	--01234-
+	--01234-
+	--01234-
+	--01234-
+	
+	---01234
+	---01234
+	---01234
+	---01234
+	
+d 8*5
+	0123 4567
+	0123 4567
+	0123 4567
+	0123 4567
+	0123 4567
+*/
         const cnn_size_t nblocks = out.width_ / 4;
         for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
             for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
@@ -151,45 +188,10 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
         }
     } else if (out.height_ == 1 && out.width_ == 1) {
         for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
-            float* delta_dst0 = pdelta_dst_org;
-            float* delta_dst1 = &pdelta_dst_org[in_padded.width_ * 1];
-            float* delta_dst2 = &pdelta_dst_org[in_padded.width_ * 2];
-            float* delta_dst3 = &pdelta_dst_org[in_padded.width_ * 3];
-            float* delta_dst4 = &pdelta_dst_org[in_padded.width_ * 4];
-            __m256 dst0 = _mm256_loadu_ps(delta_dst0);
-            __m256 dst1 = _mm256_loadu_ps(delta_dst1);
-            __m256 dst2 = _mm256_loadu_ps(delta_dst2);
-            __m256 dst3 = _mm256_loadu_ps(delta_dst3);
-            __m256 dst4 = _mm256_loadu_ps(delta_dst4);
-
-            // *FROM
-            // ---0 0000
-            // ---1 1111
-            // ---2 2222
-            // ---3 3333
-            // ---4 4444
-            //
-            // *TO
-            // 1110 0000
-            // 3222 2211
-            // 4444 3333
-            // ---- ---4
-            __m256 sum0 = _mm256_blend_ps(
-                dst0,
-                leftShift<20>(dst1),
-                0xE0 /* 0b11100000 */
-            );
-            __m256 sum1 = _mm256_blend_ps(
-                leftShift<28>(dst3),
-                _mm256_blend_ps(leftShift<8>(dst2), rightShift<12>(dst1), 0x03 /* 0b00000011 */),
-                0x7F /* 0b01111111 */
-            );
-            __m256 sum2 = _mm256_blend_ps(
-                leftShift<16>(dst4),
-                rightShift<4>(dst3),
-                0x0F /* 0b00001111 */
-            );
-            __m128 sum3 = _mm256_extractf128_ps(dst4, 1);
+            __m256 sum0 = _mm256_setzero_ps();
+            __m256 sum1 = _mm256_setzero_ps();
+            __m256 sum2 = _mm256_setzero_ps();
+            __m128 sum3 = _mm_setzero_ps();
 
             size_t widx = 25 * inc;
             size_t wstep = 25 * in.depth_;
@@ -225,6 +227,17 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
                 }
             }
 
+            float* delta_dst0 = pdelta_dst_org;
+            float* delta_dst1 = &pdelta_dst_org[in_padded.width_ * 1];
+            float* delta_dst2 = &pdelta_dst_org[in_padded.width_ * 2];
+            float* delta_dst3 = &pdelta_dst_org[in_padded.width_ * 3];
+            float* delta_dst4 = &pdelta_dst_org[in_padded.width_ * 4];
+            __m256 dst0 = _mm256_loadu_ps(delta_dst0);
+            __m256 dst1 = _mm256_loadu_ps(delta_dst1);
+            __m256 dst2 = _mm256_loadu_ps(delta_dst2);
+            __m256 dst3 = _mm256_loadu_ps(delta_dst3);
+            __m256 dst4 = _mm256_loadu_ps(delta_dst4);
+
             // *FROM
             // 1110 0000
             // 3222 2211
@@ -237,40 +250,45 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
             // ---2 2222
             // ---3 3333
             // ---4 4444
-            dst0 = _mm256_blend_ps(
-                dst0,
+            __m256 new_sum0 = _mm256_blend_ps(
+                _mm256_setzero_ps(),
                 sum0,
                 0x1F /* 0b00011111 */
             );
-            dst1 = _mm256_blend_ps(
-                dst1,
+            __m256 new_sum1 = _mm256_blend_ps(
+                _mm256_setzero_ps(),
                 _mm256_or_ps(
                     rightShift<20>(sum0),
                     leftShift<12>(sum1)
                 ),
                 0x1F /* 0b00011111 */
             );
-            dst2 = _mm256_blend_ps(
-                dst2,
+            __m256 new_sum2 = _mm256_blend_ps(
+                _mm256_setzero_ps(),
                 rightShift<8>(sum1),
                 0x1F /* 0b00011111 */
             );
-            dst3 = _mm256_blend_ps(
-                dst3,
+            __m256 new_sum3 = _mm256_blend_ps(
+                _mm256_setzero_ps(),
                 _mm256_or_ps(
                     rightShift<28>(sum1),
                     leftShift<4>(sum2)
                 ),
                 0x1F /* 0b00011111 */
             );
-            dst4 = _mm256_blend_ps(
-                dst4,
+            __m256 new_sum4 = _mm256_blend_ps(
+                _mm256_setzero_ps(),
                 _mm256_set_m128(
                     sum3,
                     _mm256_extractf128_ps(sum2, 1)
                 ),
                 0x1F /* 0b00011111 */
             );
+            dst0 = _mm256_add_ps(dst0, new_sum0);
+            dst1 = _mm256_add_ps(dst1, new_sum1);
+            dst2 = _mm256_add_ps(dst2, new_sum2);
+            dst3 = _mm256_add_ps(dst3, new_sum3);
+            dst4 = _mm256_add_ps(dst4, new_sum4);
 
             _mm256_storeu_ps(delta_dst0, dst0);
             _mm256_storeu_ps(delta_dst1, dst1);
@@ -279,6 +297,23 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
             _mm256_storeu_ps(delta_dst4, dst4);
         } // for
     } else {
+/*
+s 1
+	0000 0000
+	
+w 5*5
+	01234---
+	01234---
+	01234---
+	01234---
+
+d 5*5
+	0123 4567
+	0123 4567
+	0123 4567
+	0123 4567
+	0123 4567
+*/
         for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
             for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
                 if (!tbl.is_connected(outc, inc)) continue;
