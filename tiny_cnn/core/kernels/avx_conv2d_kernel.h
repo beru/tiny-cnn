@@ -173,8 +173,9 @@ abc abc
                 const __m256 w0a = leftShift<4>(w0);
                 const __m256 w1a = leftShift<4>(w1);
                 const __m256 w2a = leftShift<4>(w2);
-                const __m256 mask0 = _mm256_setr_ps(1,1,1,0,1,1,1,0);
-                const __m256 mask1 = _mm256_setr_ps(0,1,1,1,0,1,1,1);
+                static const __m256 mask0 = _mm256_setr_ps(1,1,1,0,1,1,1,0);
+                static const __m256 mask1 = _mm256_setr_ps(0,1,1,1,0,1,1,1);
+                static const __m128 mask2 = _mm_castsi128_ps(_mm_setr_epi32(-1, -1, -1, 0));
                 float* ppa = pa;
                 for (cnn_size_t y = 0; y < out.height_; y++) {
                     const float* pi0 = (pi + y * stride);
@@ -219,14 +220,15 @@ abc abc
                     }
                     for (; x < out.width_; ++x) {
                         __m128 sum = _mm_load_ss(&ppa[x]);
-                        __m256 i0 = _mm256_loadu_ps(pi0);
-                        __m256 i1 = _mm256_loadu_ps(pi1);
-                        __m256 i2 = _mm256_loadu_ps(pi2);
-                        __m256 sum0 = _mm256_mul_ps(w0a, i0);
-                        __m256 sum1 = _mm256_mul_ps(w1a, i1);
-                        sum0 = madd(w2a, i2, sum0);
-                        sum0 = _mm256_add_ps(sum0, sum1);
-                        _mm_store_ss(&ppa[x], _mm_add_ss(sum, hsum256_ps(sum0)));
+                        __m128 i0 = _mm_loadu_ps(pi0);
+                        __m128 i1 = _mm_loadu_ps(pi1);
+                        __m128 i2 = _mm_loadu_ps(pi2);
+                        __m128 sum0 = _mm_mul_ps(_mm256_castps256_ps128(w0), i0);
+                        __m128 sum1 = _mm_mul_ps(_mm256_castps256_ps128(w1), i1);
+                        __m128 sum2 = _mm_mul_ps(_mm256_castps256_ps128(w2), i2);
+                        sum0 = _mm_add_ps(sum2, _mm_add_ps(sum0, sum1));
+                        sum0 = _mm_and_ps(sum0, mask2);
+                        _mm_store_ss(&ppa[x], _mm_add_ss(sum, hsum128_ps(sum0)));
 //                      printf("%d %d %d %f\n", inc, y, x, ppa[x]);
                         pi0 += w_stride;
                         pi1 += w_stride;
