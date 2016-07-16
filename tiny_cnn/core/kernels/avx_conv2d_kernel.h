@@ -73,9 +73,9 @@ void avx_conv2d_3x3_kernel(const conv_params& params,
                     __m128 w1 = _mm_load_ss(pw+8);
                     __m128 i1 = _mm_load_ss(pi+8);
                     __m256 tmp0 = _mm256_mul_ps(w0, i0);
-                    __m128 tmp1 = _mm_mul_ps(w1, i1);
+                    __m128 tmp1 = _mm_mul_ss(w1, i1);
                     sum0 = _mm256_add_ps(tmp0, sum0);
-                    sum1 = _mm_add_ps(tmp1, sum1);
+                    sum1 = _mm_add_ss(tmp1, sum1);
                 }
                 __m128 b = _mm_load_ss(&bias[o]);
                 __m128 hsum = hsum256_ps(sum0);
@@ -84,7 +84,9 @@ void avx_conv2d_3x3_kernel(const conv_params& params,
             }
         } else {
             for (size_t o = 0; o < out.depth_; ++o) {
-                __m256 sum = _mm256_setzero_ps();
+                __m128 sum0 = _mm_setzero_ps();
+                __m128 sum1 = _mm_setzero_ps();
+                __m128 sum2 = _mm_setzero_ps();
                 size_t widx = 9/* params.weight.area() */ * params.in.depth_ * o;
                 size_t inidx = 0;
                 for (cnn_size_t inc = 0; inc < params.in.depth_; ++inc, widx += 9, inidx += inarea) {
@@ -92,19 +94,20 @@ void avx_conv2d_3x3_kernel(const conv_params& params,
                         continue;
                     }
                     const float* pw = (const float*) &W[widx];
-                    __m256 w0 = _mm256_loadu_ps(pw+0);
-                    __m128 w1 = _mm_load_ss(pw+8);
+                    __m128 w0 = _mm_loadu_ps(pw + 0);
+                    __m128 w1 = _mm_loadu_ps(pw + 3);
+                    __m128 w2 = _mm_loadu_ps(pw + 6);
                     const float* pi = (const float*) &in[inidx];
-                    __m256 i0 = _mm256_loadu_ps(pi + 0 * stride);
-                    __m256 i1 = _mm256_loadu_ps(pi + 1 * stride);
-                    __m256 i2 = _mm256_loadu_ps(pi + 2 * stride);
-                    __m256 sum0 = madd(w0, i0, sum);
-                    __m256 sum1 = _mm256_mul_ps(w1, i1);
-                    sum0 = madd(w2, i2, sum0);
-                    sum = _mm256_add_ps(sum0, sum1);
+                    __m128 i0 = _mm_loadu_ps(pi + 0 * stride);
+                    __m128 i1 = _mm_loadu_ps(pi + 1 * stride);
+                    __m128 i2 = _mm_loadu_ps(pi + 2 * stride);
+                    sum0 = madd(w0, i0, sum0);
+                    sum1 = madd(w1, i1, sum1);
+                    sum2 = madd(w2, i2, sum2);
                 }
+                __m128 sum = _mm_add_ps(_mm_add_ps(sum0, sum1), sum2);
                 __m128 b = _mm_load_ss(&bias[o]);
-                __m128 hsum = hsum256_ps(sum);
+                __m128 hsum = hsum128_ps(sum);
                 hsum = madd(b, y_bias_scale, hsum);
                 _mm_store_ss(&a[o], hsum);
             }

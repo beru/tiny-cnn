@@ -43,9 +43,32 @@ inline __m256d madd(__m256d a, __m256d b, __m256d c) { return _mm256_add_pd(_mm2
 inline __m128d madd(__m128d a, __m128d b, __m128d c) { return _mm_add_pd(_mm_mul_pd(a, b), c); }
 inline __m128d madd_sd(__m128d a, __m128d b, __m128d c) { return _mm_add_sd(_mm_mul_sd(a, b), c); }
 
-// Horizontally add elements of __m256 type argument (sadly, _mm256_hadd_ps isn't good enough)
-// http://stackoverflow.com/a/13222410/4699324
-// x = ( x7, x6, x5, x4, x3, x2, x1, x0 )
+// Horizontal sum routines
+// '-' lanes of returned value are not meant to be used by caller
+// (      lane4,     lane3,     lane2,    lane1 )
+// ( bits96-127, bits64-95, bits32-63, bits0-31 )
+
+// in  : ( x3, x2, x1, x0 )
+// out : (  -,  -,  -, x3+x2+x1+x0 )
+inline __m128 hsum128_ps(__m128 x)
+{
+    // loDual = ( -, -, x1, x0 )
+    const __m128 loDual = x;
+    // hiDual = ( -, -, x3, x2 )
+    const __m128 hiDual = _mm_movehl_ps(x, x);
+    // sumDual = ( -, -, x1+x3, x0+x2 )
+    const __m128 sumDual = _mm_add_ps(loDual, hiDual);
+    // lo = ( -, -, -, x0+x2 )
+    const __m128 lo = sumDual;
+    // hi = ( -, -, -, x1+x3 )
+    const __m128 hi = _mm_shuffle_ps(sumDual, sumDual, 0x1);
+    // sum = ( -, -, -, x0+x1+x2+x3 )
+    const __m128 sum = _mm_add_ss(lo, hi);
+    return sum;
+}
+
+// in  : ( x7, x6, x5, x4, x3, x2, x1, x0 )
+// out : (  -,  -,  -,  -,  -,  -,  -, x7+x6+x5+x4+x3+x2+x1+x0 )
 inline __m128 hsum256_ps(__m256 x) {
     // hiQuad = ( x7, x6, x5, x4 )
     const __m128 hiQuad = _mm256_extractf128_ps(x, 1);
@@ -69,6 +92,9 @@ inline __m128 hsum256_ps(__m256 x) {
 }
 
 // Horizontally add elements of each __m256 type arguments at once
+// in a : ( a7, a6, a5, a4, a3, a2, a1, a0 )
+// in b : ( b7, b6, b5, b4, b3, b2, b1, b0 )
+// out  : (  -,  -,  -,  -,  -,  -, b1+b5+b3+b7+b0+b4+b2+b6, a1+a5+a3+a7+a0+a4+a2+a6 )
 inline __m128 hsum2x256_ps(__m256 a, __m256 b) {
     // (b3, b2, b1, b0, a3, a2, a1, a0)
     __m256 x = _mm256_permute2f128_ps(a, b, 0x20);
@@ -91,6 +117,8 @@ inline __m128 hsum2x256_ps(__m256 a, __m256 b) {
     return ret;
 }
 
+// in  : ( x3, x2, x1, x0 )
+// out : (  -,  -,  -, x3+x2+x1+x0 )
 inline __m128d hsum256_pd(__m256d x) {
     // hiDual = ( x3, x2 )
     const __m128d hiDual = _mm256_extractf128_pd(x, 1);
