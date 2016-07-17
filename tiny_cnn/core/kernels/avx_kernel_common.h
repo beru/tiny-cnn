@@ -35,6 +35,15 @@
         _mm256_insertf128_ps(_mm256_castps128_ps256(vb), va, 1)
 #endif
 
+#if 0
+inline __m256 add(__m256 a, __m256 b) { return _mm256_add_ps(a, b); }
+inline __m128 add(__m128 a, __m128 b) { return _mm_add_ps(a, b); }
+inline __m128 add_ss(__m128 a, __m128 b) { return _mm_add_ss(a, b); }
+inline __m256 mul(__m256 a, __m256 b) { return _mm256_mul_ps(a, b); }
+inline __m128 mul(__m128 a, __m128 b) { return _mm_mul_ps(a, b); }
+inline __m128 mul_ss(__m128 a, __m128 b) { return _mm_mul_ss(a, b); }
+#endif
+
 #if 1
 inline __m256 madd(__m256 a, __m256 b, __m256 c) { return _mm256_add_ps(_mm256_mul_ps(a, b), c); }
 inline __m128 madd(__m128 a, __m128 b, __m128 c) { return _mm_add_ps(_mm_mul_ps(a, b), c); }
