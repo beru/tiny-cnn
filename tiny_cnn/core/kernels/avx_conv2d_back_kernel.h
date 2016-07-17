@@ -36,6 +36,355 @@ namespace kernels {
 
 // float ver
 template <typename Allocator>
+void accumulate_db(const index3d<cnn_size_t>&           param_out,
+                   const std::vector<float, Allocator>& curr_delta,
+                   std::vector<float, Allocator>&       db) {
+    //fvec_t& db = *in_grad[2];
+    if (param_out.width_ == 1 && param_out.height_ == 1) {
+        size_t nblocks = param_out.depth_ / 8;
+        size_t remainder = param_out.depth_ & 7;
+        for (size_t i = 0; i < nblocks; ++i) {
+            _mm256_storeu_ps(&db[i*8], _mm256_add_ps(_mm256_loadu_ps(&db[i*8]), _mm256_loadu_ps(&curr_delta[i*8])));
+        }
+        for (cnn_size_t outc = nblocks * 8; outc < param_out.depth_; outc++) {
+            db[outc] += curr_delta[outc];
+        }
+    } else {
+        auto area = param_out.area();
+        size_t nblocks = area / 8;
+        size_t remainder = area & 7;
+        // prepare load-mask beforehand
+        static const int32_t masks[] = {
+            -1, -1, -1, -1,
+            -1, -1, -1, -1,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+        };
+        __m256i mask = _mm256_loadu_si256((const __m256i*)(masks + 8 - remainder));
+        for (cnn_size_t outc = 0; outc < param_out.depth_; outc++) {
+            const float *delta = &curr_delta[param_out.get_index(0, 0, outc)];
+            __m256 sum = _mm256_setzero_ps();
+            for (size_t i=0; i<nblocks; ++i) {
+                sum = _mm256_add_ps(sum, _mm256_loadu_ps(delta + i*8));
+            }
+            __m256 sum1 = _mm256_loadu_ps(delta + nblocks*8);
+            sum1 = _mm256_and_ps(sum1, _mm256_castsi256_ps(mask));
+            sum = _mm256_add_ps(sum, sum1);
+            db[outc] += _mm_cvtss_f32(hsum256_ps(sum));
+        }
+    }
+}
+
+inline void accumulate_db(const index3d<cnn_size_t>& param_out,
+                          const vec_t&               curr_delta,
+                          vec_t&                     db) {
+    //vec_t& db = *in_grad[2];
+    for (cnn_size_t outc = 0; outc < param_out.depth_; outc++) {
+        cnn_size_t idx = param_out.get_index(0, 0, outc);
+        const float_t * delta = &curr_delta[idx];
+        const float_t * deltaa = delta + param_out.width_ *
+                                         param_out.height_;
+        db[outc] += std::accumulate(delta, deltaa, float_t(0));
+    }
+}
+
+// float ver
+template <typename Allocator>
+void avx_conv2d_3x3_back_kernel(const conv_params& params,
+                                const std::vector<float, Allocator>& prev_out,
+                                const std::vector<float, Allocator>& W,
+                                std::vector<float, Allocator>&       dW,
+                                std::vector<float, Allocator>&       db,
+                                std::vector<float, Allocator>&       curr_delta,
+                                std::vector<float, Allocator>*       prev_delta) {
+    assert(params.weight.height_ == 3 && params.weight.width_ == 3);
+    
+    auto& in        = params.in;
+    auto& out       = params.out;
+    auto& in_padded = params.in_padded;
+    auto& tbl       = params.tbl;
+    auto  w_stride  = params.w_stride;
+    const size_t in_padded_area = in_padded.area();
+    float* pdelta_dst_org = &(*prev_delta)[0];
+    const size_t  h_stride2 = params.h_stride * in_padded.width_;
+    static const __m256 mask = _mm256_castsi256_ps(_mm256_setr_epi32(-1, -1, -1, -1, -1, 0, 0, 0));
+    // propagate delta to previous layer
+    if (w_stride == 1 && out.width_ >= 4) {
+        const cnn_size_t nblocks = out.width_ / 4;
+        for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
+            for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
+                if (!tbl.is_connected(outc, inc)) continue;
+                const float* pw = &W[9 * (in.depth_ * outc + inc)];
+                const float* pdelta_src = &curr_delta[out.get_index(0, 0, outc)];
+                float* pdelta_dst = pdelta_dst_org;
+                __m256 w0a = _mm256_and_ps(_mm256_loadu_ps(pw+0), mask);
+                __m256 w1a = _mm256_and_ps(_mm256_loadu_ps(pw+3), mask);
+                __m256 w2a = _mm256_and_ps(_mm256_loadu_ps(pw+6), mask);
+                __m256 w0b = leftShift<4>(w0a);
+                __m256 w1b = leftShift<4>(w1a);
+                __m256 w2b = leftShift<4>(w2a);
+                __m256 w0c = leftShift<8>(w0a);
+                __m256 w1c = leftShift<8>(w1a);
+                __m256 w2c = leftShift<8>(w2a);
+                __m256 w0d = leftShift<12>(w0a);
+                __m256 w1d = leftShift<12>(w1a);
+                __m256 w2d = leftShift<12>(w2a);
+                for (cnn_size_t y = 0; y < out.height_; y++) {
+                    float* delta_dst0 = pdelta_dst;
+                    float* delta_dst1 = &pdelta_dst[in_padded.width_ * 1];
+                    float* delta_dst2 = &pdelta_dst[in_padded.width_ * 2];
+                    if (nblocks > 0) {
+                        __m256 delta_src = _mm256_broadcast_ps((const __m128*)pdelta_src);
+                        for (cnn_size_t n = 0; n < nblocks; ++n) {
+                            __m256 delta_src0 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(0, 0, 0, 0));
+                            __m256 delta_src1 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(1, 1, 1, 1));
+                            __m256 next_delta_src = _mm256_broadcast_ps((const __m128*)(pdelta_src + 4 * n + 4));
+                            __m256 tmp0 = _mm256_mul_ps(w0a, delta_src0);
+                            __m256 tmp1 = _mm256_mul_ps(w1a, delta_src0);
+                            __m256 tmp2 = _mm256_mul_ps(w2a, delta_src0);
+                            __m256 delta_src2 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(2, 2, 2, 2));
+                            tmp0 = madd(w0b, delta_src1, tmp0);
+                            tmp1 = madd(w1b, delta_src1, tmp1);
+                            tmp2 = madd(w2b, delta_src1, tmp2);
+                            __m256 delta_src3 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(3, 3, 3, 3));
+                            tmp0 = madd(w0c, delta_src2, tmp0);
+                            tmp1 = madd(w1c, delta_src2, tmp1);
+                            tmp2 = madd(w2c, delta_src2, tmp2);
+                            tmp0 = madd(w0d, delta_src3, tmp0);
+                            tmp1 = madd(w1d, delta_src3, tmp1);
+                            tmp2 = madd(w2d, delta_src3, tmp2);
+                            tmp0 = _mm256_add_ps(tmp0, _mm256_loadu_ps(delta_dst0 + 4 * n));
+                            tmp1 = _mm256_add_ps(tmp1, _mm256_loadu_ps(delta_dst1 + 4 * n));
+                            tmp2 = _mm256_add_ps(tmp2, _mm256_loadu_ps(delta_dst2 + 4 * n));
+                            _mm256_storeu_ps(delta_dst0 + 4 * n, tmp0);
+                            _mm256_storeu_ps(delta_dst1 + 4 * n, tmp1);
+                            _mm256_storeu_ps(delta_dst2 + 4 * n, tmp2);
+                            delta_src = next_delta_src;
+                        }
+                    }
+                    cnn_size_t x = nblocks * 4;
+                    if (x < out.width_) {
+                        __m256 delta_src = _mm256_broadcast_ss(pdelta_src + x);
+                        do {
+                            __m256 next_delta_src = _mm256_broadcast_ss(pdelta_src + x + 1);
+                            __m256 tmp0 = _mm256_mul_ps(w0a, delta_src);
+                            __m256 tmp1 = _mm256_mul_ps(w1a, delta_src);
+                            __m256 tmp2 = _mm256_mul_ps(w2a, delta_src);
+                            tmp0 = _mm256_add_ps(tmp0, _mm256_loadu_ps(delta_dst0 + x));
+                            tmp1 = _mm256_add_ps(tmp1, _mm256_loadu_ps(delta_dst1 + x));
+                            tmp2 = _mm256_add_ps(tmp2, _mm256_loadu_ps(delta_dst2 + x));
+                            _mm256_storeu_ps(delta_dst0 + x, tmp0);
+                            _mm256_storeu_ps(delta_dst1 + x, tmp1);
+                            _mm256_storeu_ps(delta_dst2 + x, tmp2);
+                            delta_src = next_delta_src;
+                            ++x;
+                        } while (x < out.width_);
+                    }
+                    pdelta_src += out.width_;
+                    pdelta_dst += h_stride2;
+                }
+            }
+        }
+    } else if (out.height_ == 1 && out.width_ == 1) {
+        for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
+            __m256 sum0 = _mm256_setzero_ps();
+            __m128 sum1 = _mm_setzero_ps();
+
+            size_t widx = 9 * inc;
+            size_t wstep = 9 * in.depth_;
+            const __m256 mask2 = mask;
+            if (tbl.is_empty()) {
+                for (cnn_size_t outc = 0; outc < out.depth_; outc++, widx+=wstep) {
+                    __m256 delta_src = _mm256_broadcast_ss(&curr_delta[outc]);
+                    const float* pw = (const float*)&W[widx];
+                    __m256 w0 = _mm256_loadu_ps(pw+0);
+                    __m128 w1 = _mm_load_ss(pw+8);
+                    sum0 = madd(w0, delta_src, sum0);
+                    sum1 = madd_ss(w1, _mm256_castps256_ps128(delta_src), sum1);
+                }
+            } else {
+                for (cnn_size_t outc = 0; outc < out.depth_; outc++, widx += wstep) {
+                    if (!tbl.is_connected(outc, inc)) {
+                        continue;
+                    }
+                    __m256 delta_src = _mm256_broadcast_ss(&curr_delta[outc]);
+                    const float* pw = (const float*)&W[widx];
+                    __m256 w0 = _mm256_loadu_ps(pw+0);
+                    __m128 w1 = _mm_load_ss(pw+8);
+                    sum0 = madd(w0, delta_src, sum0);
+                    sum1 = madd_ss(w1, _mm256_castps256_ps128(delta_src), sum1);
+                }
+            }
+
+            // *FROM
+            // 2211 1000
+            //      ---2
+            //
+            // *TO
+            //      -000
+            //      -111
+            //      -222
+            __m256 new_sum0 = _mm256_blend_ps(
+                _mm256_setzero_ps(),
+                sum0,
+                0x1F /* 0b00011111 */
+            );
+            __m256 new_sum1 = _mm256_blend_ps(
+                _mm256_setzero_ps(),
+                _mm256_or_ps(
+                    rightShift<20>(sum0),
+                    leftShift<12>(sum1)
+                ),
+                0x1F /* 0b00011111 */
+            );
+            __m256 new_sum2 = _mm256_blend_ps(
+                _mm256_setzero_ps(),
+                rightShift<8>(sum1),
+                0x1F /* 0b00011111 */
+            );
+            float* delta_dst0 = pdelta_dst_org;
+            float* delta_dst1 = &pdelta_dst_org[in_padded.width_ * 1];
+            float* delta_dst2 = &pdelta_dst_org[in_padded.width_ * 2];
+            __m256 dst0 = _mm_add_ps(_mm256_loadu_ps(delta_dst0), new_sum0);
+            __m256 dst1 = _mm_add_ps(_mm256_loadu_ps(delta_dst1), new_sum1);
+            __m256 dst2 = _mm_add_ps(_mm256_loadu_ps(delta_dst2), new_sum2);
+            _mm_storeu_ps(delta_dst0, dst0);
+            _mm_storeu_ps(delta_dst1, dst1);
+            _mm_storeu_ps(delta_dst2, dst2);
+        } // for
+    } else {
+        for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
+            for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
+                if (!tbl.is_connected(outc, inc)) continue;
+
+                const float* pw = &W[9 * (in.depth_ * outc + inc)];
+                const float* pdelta_src = &curr_delta[out.get_index(0, 0, outc)];
+                float* pdelta_dst = pdelta_dst_org;
+                __m128 w0a = _mm_and_ps(_mm_loadu_ps(pw+0), mask);
+                __m128 w1a = _mm_and_ps(_mm_loadu_ps(pw+3), mask);
+                __m128 w2a = _mm_and_ps(_mm_loadu_ps(pw+6), mask);
+                for (cnn_size_t y = 0; y < out.height_; y++) {
+                    float* delta_dst0 = pdelta_dst;
+                    float* delta_dst1 = &pdelta_dst[in_padded.width_ * 1];
+                    float* delta_dst2 = &pdelta_dst[in_padded.width_ * 2];
+                    for (cnn_size_t x = 0; x < out.width_; x++) {
+                        __m256 delta_src = _mm256_broadcast_ss(pdelta_src + x);
+                        __m256 dst0 = _mm256_loadu_ps(delta_dst0);
+                        __m256 dst1 = _mm256_loadu_ps(delta_dst1);
+                        __m256 dst2 = _mm256_loadu_ps(delta_dst2);
+                        dst0 = madd(w0a, delta_src, dst0);
+                        dst1 = madd(w1a, delta_src, dst1);
+                        dst2 = madd(w2a, delta_src, dst2);
+                        _mm256_storeu_ps(delta_dst0, dst0);
+                        _mm256_storeu_ps(delta_dst1, dst1);
+                        _mm256_storeu_ps(delta_dst2, dst2);
+                        delta_dst0 += w_stride;
+                        delta_dst1 += w_stride;
+                        delta_dst2 += w_stride;
+                    } // for x
+                    pdelta_src += out.width_;
+                    pdelta_dst += h_stride2;
+                } // for y
+            } // for outc
+        } // for inc
+    }
+
+    // accumulate dw
+    if (out.width_ == 1 && out.height_ == 1) {
+        const float* pprev_out = &prev_out[0];
+        for (size_t inc = 0; inc < in.depth_; ++inc, pprev_out += in_padded_area) {
+            VECTORIZE_ALIGN(32) float floats[28];
+            size_t in_padded_width = in_padded.width_;
+            _mm256_store_ps(&floats[0], _mm256_loadu_ps(pprev_out + in_padded_width * 0));
+            _mm256_storeu_ps(&floats[3], _mm256_loadu_ps(pprev_out + in_padded_width * 1));
+            _mm256_storeu_ps(&floats[6], _mm256_loadu_ps(pprev_out + in_padded_width * 2));
+            __m256 prevos0 = _mm256_load_ps(&floats[0]);
+            __m256 prevos1 = _mm256_load_ps(&floats[8]);
+            __m256 prevos2 = _mm256_load_ps(&floats[16]);
+            __m128 prevos3 = _mm_load_ss(&floats[24]);
+            cnn_size_t widx = 9 * inc;
+            cnn_size_t widx_delta = 9 * in.depth_;
+            float* pdW = &dW[widx];
+            const float* pcurr_delta = &curr_delta[0];
+            __m256 delta = _mm256_broadcast_ss(pcurr_delta);
+            for (cnn_size_t outc = 0; outc < out.depth_; outc++, pdW += widx_delta) {
+                __m256 next_delta = _mm256_broadcast_ss(pcurr_delta + outc + 1);
+                if (tbl.is_connected(outc, inc)) {
+                    __m256 w0 = _mm256_loadu_ps(pdW+0);
+                    __m256 w1 = _mm256_loadu_ps(pdW+8);
+                    __m256 w2 = _mm256_loadu_ps(pdW+16);
+                    __m128 w3 = _mm_load_ss(pdW+24);
+                    w0 = madd(prevos0, delta, w0);
+                    w1 = madd(prevos1, delta, w1);
+                    w2 = madd(prevos2, delta, w2);
+                    w3 = madd_ss(prevos3, _mm256_castps256_ps128(delta), w3);
+                    _mm256_storeu_ps(pdW+0, w0);
+                    _mm256_storeu_ps(pdW+8, w1);
+                    _mm256_storeu_ps(pdW+16, w2);
+                    _mm_store_ss(pdW+24, w3);
+                }
+                delta = next_delta;
+            }
+        }
+    } else {
+        const size_t nblocks = out.width_ / 8;
+        const size_t remainder = out.width_ & 7;
+        // prepare load-mask beforehand
+        static const int32_t masks[] = {
+            -1, -1, -1, -1,
+            -1, -1, -1, -1,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+        };
+        __m256i mask = _mm256_loadu_si256((const __m256i*)(masks + 8 - remainder));
+        auto& weight = params.weight;
+        for (size_t inc = 0; inc < in.depth_; ++inc) {
+            for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
+
+                if (!tbl.is_connected(outc, inc)) continue;
+                const float* delta = &curr_delta[out.get_index(0, 0, outc)];
+
+                cnn_size_t widx = weight.get_index(0, 0, in.depth_ * outc + inc);
+                for (cnn_size_t wy = 0; wy < 3 /* weight.height_ */; wy++) {
+                    for (cnn_size_t wx = 0; wx < 3 /* weight.width_ */; wx++) {
+                        const float* prevo = &prev_out[in_padded.get_index(wx, wy, inc)];
+                        __m256 sum0 = _mm256_setzero_ps();
+                        __m256 sum1 = _mm256_setzero_ps();
+                        const float* pa = prevo;
+                        const float* pb = delta;
+                        for (cnn_size_t y = 0; y < out.height_; y++) {
+                            // vectorize::dot
+                            for (size_t i=0; i<nblocks; ++i) {
+                                __m256 a = _mm256_loadu_ps(pa+8*i);
+                                __m256 b = _mm256_loadu_ps(pb+8*i);
+                                sum0 = madd(a, b, sum0);
+                            }
+                            if (remainder) {
+                                __m256 a = _mm256_loadu_ps(pa+8*nblocks);
+                                __m256 b = _mm256_loadu_ps(pb+8*nblocks);
+                                sum1 = madd(a, b, sum1);
+                            }
+                            pa += in_padded.width_;
+                            pb += out.width_;
+                        }
+                        sum1 = _mm256_and_ps(sum1, _mm256_castsi256_ps(mask));
+                        __m256 sum = _mm256_add_ps(sum0, sum1);
+                        _mm_store_ss(&dW[widx], _mm_add_ps(_mm_load_ss(&dW[widx]), hsum256_ps(sum)));
+                        ++widx;
+                    }
+                }
+            }
+        }
+    }
+
+    // accumulate db
+    if (params.has_bias) {
+        accumulate_db(params.out, curr_delta, db);
+    }
+} // avx_conv2d_3x3_back_kernel float ver
+
+// float ver
+template <typename Allocator>
 void avx_conv2d_5x5_back_kernel(const conv_params& params,
                                 const std::vector<float, Allocator>& prev_out,
                                 const std::vector<float, Allocator>& W,
@@ -43,6 +392,7 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
                                 std::vector<float, Allocator>&       db,
                                 std::vector<float, Allocator>&       curr_delta,
                                 std::vector<float, Allocator>*       prev_delta) {
+    assert(params.weight.height_ == 5 && params.weight.width_ == 5);
     auto& in        = params.in;
     auto& out       = params.out;
     auto& in_padded = params.in_padded;
@@ -466,33 +816,7 @@ d 5*5
 
     // accumulate db
     if (params.has_bias) {
-        //fvec_t& db = *in_grad[2];
-        if (out.width_ == 1 && out.height_ == 1) {
-            size_t nblocks = out.depth_ / 8;
-            size_t remainder = out.depth_ & 7;
-            for (size_t i = 0; i < nblocks; ++i) {
-                _mm256_storeu_ps(&db[i*8], _mm256_add_ps(_mm256_loadu_ps(&db[i*8]), _mm256_loadu_ps(&curr_delta[i*8])));
-            }
-            for (cnn_size_t outc = nblocks * 8; outc < out.depth_; outc++) {
-                db[outc] += curr_delta[outc];
-            }
-        } else {
-            auto area = out.area();
-            size_t nblocks = area / 8;
-            size_t remainder = area & 7;
-            __m256i mask = _mm256_loadu_si256((const __m256i*)(masks + 8 - remainder));
-            for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
-                const float *delta = &curr_delta[out.get_index(0, 0, outc)];
-                __m256 sum = _mm256_setzero_ps();
-                for (size_t i=0; i<nblocks; ++i) {
-                    sum = _mm256_add_ps(sum, _mm256_loadu_ps(delta + i*8));
-                }
-                __m256 sum1 = _mm256_loadu_ps(delta + nblocks*8);
-                sum1 = _mm256_and_ps(sum1, _mm256_castsi256_ps(mask));
-                sum = _mm256_add_ps(sum, sum1);
-                db[outc] += _mm_cvtss_f32(hsum256_ps(sum));
-            }
-        }
+        accumulate_db(params.out, curr_delta, db);
     }
 } // avx_conv2d_5x5_back_kernel float ver
 
@@ -505,6 +829,7 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
                                 std::vector<double, Allocator>&       db,
                                 std::vector<double, Allocator>&       curr_delta,
                                 std::vector<double, Allocator>*       prev_delta) {
+    assert(params.weight.height_ == 5 && params.weight.width_ == 5);
     // propagate delta to previous layer
     for_i(params.in.depth_, [&](int inc) {
         for (cnn_size_t outc = 0; outc < params.out.depth_; outc++) {
@@ -532,8 +857,8 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
                           y * params.h_stride * params.in_padded.width_ +
                           x * params.w_stride;
 
-                    for (cnn_size_t wy = 0; wy < params.weight.height_; wy++) {    // NOLINT
-                        for (cnn_size_t wx = 0; wx < params.weight.width_; wx++) { // NOLINT
+                    for (cnn_size_t wy = 0; wy < 5 /* params.weight.height_ */; wy++) {    // NOLINT
+                        for (cnn_size_t wx = 0; wx < 5 /* params.weight.width_ */; wx++) { // NOLINT
                             idx = wy * params.in_padded.width_ + wx;
                             ppdelta_dst[idx] += *ppw++ * ppdelta_src;
                         }
@@ -575,15 +900,7 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
 
     // accumulate db
     if (params.has_bias) {
-        //vec_t& db = *in_grad[2];
-
-        for (cnn_size_t outc = 0; outc < params.out.depth_; outc++) {
-            cnn_size_t idx = params.out.get_index(0, 0, outc);
-            const float_t * delta = &curr_delta[idx];
-            const float_t * deltaa = delta + params.out.width_ *
-                                             params.out.height_;
-            db[outc] += std::accumulate(delta, deltaa, float_t(0));
-        }
+        accumulate_db(params.out, curr_delta, db);
     }
 } // avx_conv2d_5x5_back_kernel double ver
 
@@ -669,15 +986,7 @@ inline void avx_conv2d_back_kernel(const conv_params& params,
 
     // accumulate db
     if (params.has_bias) {
-        //vec_t& db = *in_grad[2];
-
-        for (cnn_size_t outc = 0; outc < params.out.depth_; outc++) {
-            cnn_size_t idx = params.out.get_index(0, 0, outc);
-            const float_t * delta = &curr_delta[idx];
-            const float_t * deltaa = delta + params.out.width_ *
-                                             params.out.height_;
-            db[outc] += std::accumulate(delta, deltaa, float_t(0));
-        }
+        accumulate_db(params.out, curr_delta, db);
     }
 }
 

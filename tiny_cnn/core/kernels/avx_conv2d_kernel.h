@@ -42,7 +42,7 @@ void avx_conv2d_3x3_kernel(const conv_params& params,
                            const std::vector<float, Allocator>& bias,
                            std::vector<float, Allocator>&       a,
                            const bool layer_parallelize) {
-    assert(params.weight.height_ == 3 && params.weight.width_ == 3 && params.weight.area() == 9);
+    assert(params.weight.height_ == 3 && params.weight.width_ == 3);
     
     auto& out       = params.out;
     auto& in_padded = params.in_padded;
