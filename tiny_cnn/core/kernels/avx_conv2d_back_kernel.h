@@ -189,7 +189,7 @@ void avx_conv2d_3x3_back_kernel(const conv_params& params,
         for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
             __m256 sum0 = _mm256_setzero_ps();
             __m128 sum1 = _mm_setzero_ps();
-
+            
             size_t widx = 9 * inc;
             size_t wstep = 9 * in.depth_;
             const __m256 mask2 = mask;
@@ -224,30 +224,30 @@ void avx_conv2d_3x3_back_kernel(const conv_params& params,
             //      -000
             //      -111
             //      -222
-            __m256 new_sum0 = _mm256_blend_ps(
-                _mm256_setzero_ps(),
-                sum0,
-                0x1F /* 0b00011111 */
+            __m128 new_sum0 = _mm_blend_ps(
+                _mm_setzero_ps(),
+                _mm256_castps256_ps128(sum0),
+                0x07 /* 0b00000111 */
             );
-            __m256 new_sum1 = _mm256_blend_ps(
-                _mm256_setzero_ps(),
-                _mm256_or_ps(
-                    rightShift<20>(sum0),
-                    leftShift<12>(sum1)
+            __m128 new_sum1 = _mm_blend_ps(
+                _mm_setzero_ps(),
+                _mm256_castps256_ps128(rightShift<12>(sum0)),
+                0x07 /* 0b00000111 */
+            );
+            __m128 new_sum2 = _mm_blend_ps(
+                _mm_setzero_ps(),
+                _mm_or_ps(
+                    _mm256_castps256_ps128(rightShift<24>(sum0)),
+                    leftShift<8>(sum1)
                 ),
-                0x1F /* 0b00011111 */
-            );
-            __m256 new_sum2 = _mm256_blend_ps(
-                _mm256_setzero_ps(),
-                rightShift<8>(sum1),
-                0x1F /* 0b00011111 */
+                0x07 /* 0b00000111 */
             );
             float* delta_dst0 = pdelta_dst_org;
             float* delta_dst1 = &pdelta_dst_org[in_padded.width_ * 1];
             float* delta_dst2 = &pdelta_dst_org[in_padded.width_ * 2];
-            __m256 dst0 = _mm_add_ps(_mm256_loadu_ps(delta_dst0), new_sum0);
-            __m256 dst1 = _mm_add_ps(_mm256_loadu_ps(delta_dst1), new_sum1);
-            __m256 dst2 = _mm_add_ps(_mm256_loadu_ps(delta_dst2), new_sum2);
+            __m128 dst0 = _mm_add_ps(_mm_loadu_ps(delta_dst0), new_sum0);
+            __m128 dst1 = _mm_add_ps(_mm_loadu_ps(delta_dst1), new_sum1);
+            __m128 dst2 = _mm_add_ps(_mm_loadu_ps(delta_dst2), new_sum2);
             _mm_storeu_ps(delta_dst0, dst0);
             _mm_storeu_ps(delta_dst1, dst1);
             _mm_storeu_ps(delta_dst2, dst2);
@@ -268,16 +268,16 @@ void avx_conv2d_3x3_back_kernel(const conv_params& params,
                     float* delta_dst1 = &pdelta_dst[in_padded.width_ * 1];
                     float* delta_dst2 = &pdelta_dst[in_padded.width_ * 2];
                     for (cnn_size_t x = 0; x < out.width_; x++) {
-                        __m256 delta_src = _mm256_broadcast_ss(pdelta_src + x);
-                        __m256 dst0 = _mm256_loadu_ps(delta_dst0);
-                        __m256 dst1 = _mm256_loadu_ps(delta_dst1);
-                        __m256 dst2 = _mm256_loadu_ps(delta_dst2);
+                        __m128 delta_src = _mm_broadcast_ss(pdelta_src + x);
+                        __m128 dst0 = _mm_loadu_ps(delta_dst0);
+                        __m128 dst1 = _mm_loadu_ps(delta_dst1);
+                        __m128 dst2 = _mm_loadu_ps(delta_dst2);
                         dst0 = madd(w0a, delta_src, dst0);
                         dst1 = madd(w1a, delta_src, dst1);
                         dst2 = madd(w2a, delta_src, dst2);
-                        _mm256_storeu_ps(delta_dst0, dst0);
-                        _mm256_storeu_ps(delta_dst1, dst1);
-                        _mm256_storeu_ps(delta_dst2, dst2);
+                        _mm_storeu_ps(delta_dst0, dst0);
+                        _mm_storeu_ps(delta_dst1, dst1);
+                        _mm_storeu_ps(delta_dst2, dst2);
                         delta_dst0 += w_stride;
                         delta_dst1 += w_stride;
                         delta_dst2 += w_stride;
@@ -293,15 +293,13 @@ void avx_conv2d_3x3_back_kernel(const conv_params& params,
     if (out.width_ == 1 && out.height_ == 1) {
         const float* pprev_out = &prev_out[0];
         for (size_t inc = 0; inc < in.depth_; ++inc, pprev_out += in_padded_area) {
-            VECTORIZE_ALIGN(32) float floats[28];
+            VECTORIZE_ALIGN(32) float floats[16];
             size_t in_padded_width = in_padded.width_;
             _mm256_store_ps(&floats[0], _mm256_loadu_ps(pprev_out + in_padded_width * 0));
             _mm256_storeu_ps(&floats[3], _mm256_loadu_ps(pprev_out + in_padded_width * 1));
             _mm256_storeu_ps(&floats[6], _mm256_loadu_ps(pprev_out + in_padded_width * 2));
             __m256 prevos0 = _mm256_load_ps(&floats[0]);
-            __m256 prevos1 = _mm256_load_ps(&floats[8]);
-            __m256 prevos2 = _mm256_load_ps(&floats[16]);
-            __m128 prevos3 = _mm_load_ss(&floats[24]);
+            __m128 prevos1 = _mm_load_ss(&floats[8]);
             cnn_size_t widx = 9 * inc;
             cnn_size_t widx_delta = 9 * in.depth_;
             float* pdW = &dW[widx];
@@ -311,17 +309,11 @@ void avx_conv2d_3x3_back_kernel(const conv_params& params,
                 __m256 next_delta = _mm256_broadcast_ss(pcurr_delta + outc + 1);
                 if (tbl.is_connected(outc, inc)) {
                     __m256 w0 = _mm256_loadu_ps(pdW+0);
-                    __m256 w1 = _mm256_loadu_ps(pdW+8);
-                    __m256 w2 = _mm256_loadu_ps(pdW+16);
-                    __m128 w3 = _mm_load_ss(pdW+24);
+                    __m128 w1 = _mm_load_ss(pdW+8);
                     w0 = madd(prevos0, delta, w0);
-                    w1 = madd(prevos1, delta, w1);
-                    w2 = madd(prevos2, delta, w2);
-                    w3 = madd_ss(prevos3, _mm256_castps256_ps128(delta), w3);
+                    w1 = madd_ss(prevos3, _mm256_castps256_ps128(delta), w1);
                     _mm256_storeu_ps(pdW+0, w0);
-                    _mm256_storeu_ps(pdW+8, w1);
-                    _mm256_storeu_ps(pdW+16, w2);
-                    _mm_store_ss(pdW+24, w3);
+                    _mm_store_ss(pdW+8, w1);
                 }
                 delta = next_delta;
             }
