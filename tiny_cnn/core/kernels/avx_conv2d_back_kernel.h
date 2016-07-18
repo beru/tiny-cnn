@@ -117,9 +117,9 @@ void avx_conv2d_3x3_back_kernel(const conv_params& params,
                 const float* pw = &W[9 * (in.depth_ * outc + inc)];
                 const float* pdelta_src = &curr_delta[out.get_index(0, 0, outc)];
                 float* pdelta_dst = pdelta_dst_org;
-                __m256 w0a = _mm256_and_ps(_mm256_loadu_ps(pw+0), mask);
-                __m256 w1a = _mm256_and_ps(_mm256_loadu_ps(pw+3), mask);
-                __m256 w2a = _mm256_and_ps(_mm256_loadu_ps(pw+6), mask);
+                __m128 w0a = _mm_blend_ps(_mm128_loadu_ps(pw+0), _mm_setzero_ps(), 0x07 /* 0b00000111 */);
+                __m128 w1a = _mm_blend_ps(_mm128_loadu_ps(pw+3), _mm_setzero_ps(), 0x07 /* 0b00000111 */);
+                __m128 w2a = _mm_blend_ps(_mm128_loadu_ps(pw+6), _mm_setzero_ps(), 0x07 /* 0b00000111 */);
                 __m256 w0b = leftShift<4>(w0a);
                 __m256 w1b = leftShift<4>(w1a);
                 __m256 w2b = leftShift<4>(w2a);
@@ -398,46 +398,46 @@ void avx_conv2d_5x5_back_kernel(const conv_params& params,
     if (w_stride == 1 && out.width_ >= 4) {
 /*
 s 4
-	0123 0123
-	
-	0000 0000
-	1111 1111
-	2222 2222
-	3333 3333
-	
+    0123 0123
+    
+    0000 0000
+    1111 1111
+    2222 2222
+    3333 3333
+    
 w 5*5 4
-	01234---
-	01234---
-	01234---
-	01234---
-	01234---
+    01234---
+    01234---
+    01234---
+    01234---
+    01234---
 
-	-01234--
-	-01234--
-	-01234--
-	-01234--
-	-01234--
-	
-	--01234-
-	--01234-
-	--01234-
-	--01234-
-	--01234-
-	
-	---01234
-	---01234
-	---01234
-	---01234
-	---01234
-	
+    -01234--
+    -01234--
+    -01234--
+    -01234--
+    -01234--
+    
+    --01234-
+    --01234-
+    --01234-
+    --01234-
+    --01234-
+    
+    ---01234
+    ---01234
+    ---01234
+    ---01234
+    ---01234
+    
 d 8*5
-	0123 4567
-	0123 4567
-	0123 4567
-	0123 4567
-	0123 4567
+    0123 4567
+    0123 4567
+    0123 4567
+    0123 4567
+    0123 4567
 */
-        const cnn_size_t nblocks = out.width_ / 4;
+        const cnn_size_t nblocks = out.width_ / 8;
         for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
             for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
                 if (!tbl.is_connected(outc, inc)) continue;
@@ -472,15 +472,21 @@ d 8*5
                     float* delta_dst4 = &pdelta_dst[in_padded.width_ * 4];
                     if (nblocks > 0) {
                         __m256 delta_src = _mm256_broadcast_ps((const __m128*)pdelta_src);
-                        for (cnn_size_t n = 0; n < nblocks; ++n) {
+                        __m256 remain0 = _mm256_setzero_ps();
+                        __m256 remain1 = _mm256_setzero_ps();
+                        __m256 remain2 = _mm256_setzero_ps();
+                        __m256 remain3 = _mm256_setzero_ps();
+                        __m256 remain4 = _mm256_setzero_ps();
+                        cnn_size_t n = 0;
+                        do {
                             __m256 delta_src0 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(0, 0, 0, 0));
                             __m256 delta_src1 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(1, 1, 1, 1));
-                            __m256 next_delta_src = _mm256_broadcast_ps((const __m128*)(pdelta_src + 4 * n + 4));
-                            __m256 tmp0 = _mm256_mul_ps(w0a, delta_src0);
-                            __m256 tmp1 = _mm256_mul_ps(w1a, delta_src0);
-                            __m256 tmp2 = _mm256_mul_ps(w2a, delta_src0);
-                            __m256 tmp3 = _mm256_mul_ps(w3a, delta_src0);
-                            __m256 tmp4 = _mm256_mul_ps(w4a, delta_src0);
+                            __m256 next_delta_src = _mm256_broadcast_ps((const __m128*)(pdelta_src + 8 * n + 4));
+                            __m256 tmp0 = madd(w0a, delta_src0, remain0);
+                            __m256 tmp1 = madd(w1a, delta_src0, remain1);
+                            __m256 tmp2 = madd(w2a, delta_src0, remain2);
+                            __m256 tmp3 = madd(w3a, delta_src0, remain3);
+                            __m256 tmp4 = madd(w4a, delta_src0, remain4);
                             __m256 delta_src2 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(2, 2, 2, 2));
                             tmp0 = madd(w0b, delta_src1, tmp0);
                             tmp1 = madd(w1b, delta_src1, tmp1);
@@ -498,20 +504,72 @@ d 8*5
                             tmp2 = madd(w2d, delta_src3, tmp2);
                             tmp3 = madd(w3d, delta_src3, tmp3);
                             tmp4 = madd(w4d, delta_src3, tmp4);
-                            tmp0 = _mm256_add_ps(tmp0, _mm256_loadu_ps(delta_dst0 + 4 * n));
-                            tmp1 = _mm256_add_ps(tmp1, _mm256_loadu_ps(delta_dst1 + 4 * n));
-                            tmp2 = _mm256_add_ps(tmp2, _mm256_loadu_ps(delta_dst2 + 4 * n));
-                            tmp3 = _mm256_add_ps(tmp3, _mm256_loadu_ps(delta_dst3 + 4 * n));
-                            tmp4 = _mm256_add_ps(tmp4, _mm256_loadu_ps(delta_dst4 + 4 * n));
-                            _mm256_storeu_ps(delta_dst0 + 4 * n, tmp0);
-                            _mm256_storeu_ps(delta_dst1 + 4 * n, tmp1);
-                            _mm256_storeu_ps(delta_dst2 + 4 * n, tmp2);
-                            _mm256_storeu_ps(delta_dst3 + 4 * n, tmp3);
-                            _mm256_storeu_ps(delta_dst4 + 4 * n, tmp4);
+                            
                             delta_src = next_delta_src;
-                        }
+                            delta_src0 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(0, 0, 0, 0));
+                            delta_src1 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(1, 1, 1, 1));
+                            next_delta_src = _mm256_broadcast_ps((const __m128*)(pdelta_src + 8 * n + 8));
+                            __m256 tmp0a = _mm256_mul_ps(w0a, delta_src0);
+                            __m256 tmp1a = _mm256_mul_ps(w1a, delta_src0);
+                            __m256 tmp2a = _mm256_mul_ps(w2a, delta_src0);
+                            __m256 tmp3a = _mm256_mul_ps(w3a, delta_src0);
+                            __m256 tmp4a = _mm256_mul_ps(w4a, delta_src0);
+                            delta_src2 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(2, 2, 2, 2));
+                            tmp0a = madd(w0b, delta_src1, tmp0a);
+                            tmp1a = madd(w1b, delta_src1, tmp1a);
+                            tmp2a = madd(w2b, delta_src1, tmp2a);
+                            tmp3a = madd(w3b, delta_src1, tmp3a);
+                            tmp4a = madd(w4b, delta_src1, tmp4a);
+                            delta_src3 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(3, 3, 3, 3));
+                            tmp0a = madd(w0c, delta_src2, tmp0a);
+                            tmp1a = madd(w1c, delta_src2, tmp1a);
+                            tmp2a = madd(w2c, delta_src2, tmp2a);
+                            tmp3a = madd(w3c, delta_src2, tmp3a);
+                            tmp4a = madd(w4c, delta_src2, tmp4a);
+                            tmp0a = madd(w0d, delta_src3, tmp0a);
+                            tmp1a = madd(w1d, delta_src3, tmp1a);
+                            tmp2a = madd(w2d, delta_src3, tmp2a);
+                            tmp3a = madd(w3d, delta_src3, tmp3a);
+                            tmp4a = madd(w4d, delta_src3, tmp4a);
+                            
+                            remain0 = rightShift<16>(tmp0a);
+                            remain1 = rightShift<16>(tmp1a);
+                            remain2 = rightShift<16>(tmp2a);
+                            remain3 = rightShift<16>(tmp3a);
+                            remain4 = rightShift<16>(tmp4a);
+
+                            tmp0a = leftShift<16>(tmp0a);
+                            tmp1a = leftShift<16>(tmp1a);
+                            tmp2a = leftShift<16>(tmp2a);
+                            tmp3a = leftShift<16>(tmp3a);
+                            tmp4a = leftShift<16>(tmp4a);
+
+                            tmp0 = _mm256_add_ps(tmp0, tmp0a);
+                            tmp1 = _mm256_add_ps(tmp1, tmp1a);
+                            tmp2 = _mm256_add_ps(tmp2, tmp2a);
+                            tmp3 = _mm256_add_ps(tmp3, tmp3a);
+                            tmp4 = _mm256_add_ps(tmp4, tmp4a);
+                            
+                            tmp0 = _mm256_add_ps(tmp0, _mm256_loadu_ps(delta_dst0 + 8 * n));
+                            tmp1 = _mm256_add_ps(tmp1, _mm256_loadu_ps(delta_dst1 + 8 * n));
+                            tmp2 = _mm256_add_ps(tmp2, _mm256_loadu_ps(delta_dst2 + 8 * n));
+                            tmp3 = _mm256_add_ps(tmp3, _mm256_loadu_ps(delta_dst3 + 8 * n));
+                            tmp4 = _mm256_add_ps(tmp4, _mm256_loadu_ps(delta_dst4 + 8 * n));
+                            _mm256_storeu_ps(delta_dst0 + 8 * n, tmp0);
+                            _mm256_storeu_ps(delta_dst1 + 8 * n, tmp1);
+                            _mm256_storeu_ps(delta_dst2 + 8 * n, tmp2);
+                            _mm256_storeu_ps(delta_dst3 + 8 * n, tmp3);
+                            _mm256_storeu_ps(delta_dst4 + 8 * n, tmp4);
+                            delta_src = next_delta_src;
+                            ++n;
+                        } while (n < nblocks);
+                        _mm_storeu_ps(delta_dst0 + 8 * nblocks, _mm256_castps256_ps128(remain0));
+                        _mm_storeu_ps(delta_dst1 + 8 * nblocks, _mm256_castps256_ps128(remain1));
+                        _mm_storeu_ps(delta_dst2 + 8 * nblocks, _mm256_castps256_ps128(remain2));
+                        _mm_storeu_ps(delta_dst3 + 8 * nblocks, _mm256_castps256_ps128(remain3));
+                        _mm_storeu_ps(delta_dst4 + 8 * nblocks, _mm256_castps256_ps128(remain4));
                     }
-                    cnn_size_t x = nblocks * 4;
+                    cnn_size_t x = nblocks * 8;
                     if (x < out.width_) {
                         __m256 delta_src = _mm256_broadcast_ss(pdelta_src + x);
                         do {
@@ -653,20 +711,20 @@ d 8*5
     } else {
 /*
 s 1
-	0000 0000
-	
+    0000 0000
+    
 w 5*5
-	01234---
-	01234---
-	01234---
-	01234---
+    01234---
+    01234---
+    01234---
+    01234---
 
 d 5*5
-	0123 4567
-	0123 4567
-	0123 4567
-	0123 4567
-	0123 4567
+    0123 4567
+    0123 4567
+    0123 4567
+    0123 4567
+    0123 4567
 */
         for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
             for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
