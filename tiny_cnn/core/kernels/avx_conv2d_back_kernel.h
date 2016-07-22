@@ -30,6 +30,11 @@
 #include "tiny_cnn/core/params/conv_params.h"
 #include "tiny_cnn/core/kernels/avx_kernel_common.h"
 
+#if _MSC_VER
+#else
+#define __assume(cond) do { if (!(cond)) __builtin_unreachable(); } while (0)
+#endif
+
 namespace tiny_cnn {
 namespace core {
 namespace kernels {
@@ -437,7 +442,8 @@ d 8*5
     0123 4567
     0123 4567
 */
-        const cnn_size_t nblocks = out.width_ / 8;
+        const cnn_size_t nblocks = out.width_ / 4;
+        const cnn_size_t remainder = out.width_ & 3;
         for (size_t inc = 0; inc < in.depth_; ++inc, pdelta_dst_org += in_padded_area) {
             for (cnn_size_t outc = 0; outc < out.depth_; outc++) {
                 if (!tbl.is_connected(outc, inc)) continue;
@@ -470,23 +476,17 @@ d 8*5
                     float* delta_dst2 = &pdelta_dst[in_padded.width_ * 2];
                     float* delta_dst3 = &pdelta_dst[in_padded.width_ * 3];
                     float* delta_dst4 = &pdelta_dst[in_padded.width_ * 4];
+                    __m256 delta_src = _mm256_broadcast_ps((const __m128*)pdelta_src);
                     if (nblocks > 0) {
-                        __m256 delta_src = _mm256_broadcast_ps((const __m128*)pdelta_src);
-                        __m256 remain0 = _mm256_setzero_ps();
-                        __m256 remain1 = _mm256_setzero_ps();
-                        __m256 remain2 = _mm256_setzero_ps();
-                        __m256 remain3 = _mm256_setzero_ps();
-                        __m256 remain4 = _mm256_setzero_ps();
-                        cnn_size_t n = 0;
-                        do {
+                        for (cnn_size_t n = 0; n < nblocks; ++n) {
                             __m256 delta_src0 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(0, 0, 0, 0));
                             __m256 delta_src1 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(1, 1, 1, 1));
-                            __m256 next_delta_src = _mm256_broadcast_ps((const __m128*)(pdelta_src + 8 * n + 4));
-                            __m256 tmp0 = madd(w0a, delta_src0, remain0);
-                            __m256 tmp1 = madd(w1a, delta_src0, remain1);
-                            __m256 tmp2 = madd(w2a, delta_src0, remain2);
-                            __m256 tmp3 = madd(w3a, delta_src0, remain3);
-                            __m256 tmp4 = madd(w4a, delta_src0, remain4);
+                            __m256 next_delta_src = _mm256_broadcast_ps((const __m128*)(pdelta_src + 4 * n + 4));
+                            __m256 tmp0 = _mm256_mul_ps(w0a, delta_src0);
+                            __m256 tmp1 = _mm256_mul_ps(w1a, delta_src0);
+                            __m256 tmp2 = _mm256_mul_ps(w2a, delta_src0);
+                            __m256 tmp3 = _mm256_mul_ps(w3a, delta_src0);
+                            __m256 tmp4 = _mm256_mul_ps(w4a, delta_src0);
                             __m256 delta_src2 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(2, 2, 2, 2));
                             tmp0 = madd(w0b, delta_src1, tmp0);
                             tmp1 = madd(w1b, delta_src1, tmp1);
@@ -504,94 +504,56 @@ d 8*5
                             tmp2 = madd(w2d, delta_src3, tmp2);
                             tmp3 = madd(w3d, delta_src3, tmp3);
                             tmp4 = madd(w4d, delta_src3, tmp4);
-                            
+                            tmp0 = _mm256_add_ps(tmp0, _mm256_loadu_ps(delta_dst0 + 4 * n));
+                            tmp1 = _mm256_add_ps(tmp1, _mm256_loadu_ps(delta_dst1 + 4 * n));
+                            tmp2 = _mm256_add_ps(tmp2, _mm256_loadu_ps(delta_dst2 + 4 * n));
+                            tmp3 = _mm256_add_ps(tmp3, _mm256_loadu_ps(delta_dst3 + 4 * n));
+                            tmp4 = _mm256_add_ps(tmp4, _mm256_loadu_ps(delta_dst4 + 4 * n));
+                            _mm256_storeu_ps(delta_dst0 + 4 * n, tmp0);
+                            _mm256_storeu_ps(delta_dst1 + 4 * n, tmp1);
+                            _mm256_storeu_ps(delta_dst2 + 4 * n, tmp2);
+                            _mm256_storeu_ps(delta_dst3 + 4 * n, tmp3);
+                            _mm256_storeu_ps(delta_dst4 + 4 * n, tmp4);
                             delta_src = next_delta_src;
-                            delta_src0 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(0, 0, 0, 0));
-                            delta_src1 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(1, 1, 1, 1));
-                            next_delta_src = _mm256_broadcast_ps((const __m128*)(pdelta_src + 8 * n + 8));
-                            __m256 tmp0a = _mm256_mul_ps(w0a, delta_src0);
-                            __m256 tmp1a = _mm256_mul_ps(w1a, delta_src0);
-                            __m256 tmp2a = _mm256_mul_ps(w2a, delta_src0);
-                            __m256 tmp3a = _mm256_mul_ps(w3a, delta_src0);
-                            __m256 tmp4a = _mm256_mul_ps(w4a, delta_src0);
-                            delta_src2 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(2, 2, 2, 2));
-                            tmp0a = madd(w0b, delta_src1, tmp0a);
-                            tmp1a = madd(w1b, delta_src1, tmp1a);
-                            tmp2a = madd(w2b, delta_src1, tmp2a);
-                            tmp3a = madd(w3b, delta_src1, tmp3a);
-                            tmp4a = madd(w4b, delta_src1, tmp4a);
-                            delta_src3 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(3, 3, 3, 3));
-                            tmp0a = madd(w0c, delta_src2, tmp0a);
-                            tmp1a = madd(w1c, delta_src2, tmp1a);
-                            tmp2a = madd(w2c, delta_src2, tmp2a);
-                            tmp3a = madd(w3c, delta_src2, tmp3a);
-                            tmp4a = madd(w4c, delta_src2, tmp4a);
-                            tmp0a = madd(w0d, delta_src3, tmp0a);
-                            tmp1a = madd(w1d, delta_src3, tmp1a);
-                            tmp2a = madd(w2d, delta_src3, tmp2a);
-                            tmp3a = madd(w3d, delta_src3, tmp3a);
-                            tmp4a = madd(w4d, delta_src3, tmp4a);
-                            
-                            remain0 = rightShift<16>(tmp0a);
-                            remain1 = rightShift<16>(tmp1a);
-                            remain2 = rightShift<16>(tmp2a);
-                            remain3 = rightShift<16>(tmp3a);
-                            remain4 = rightShift<16>(tmp4a);
-
-                            tmp0a = leftShift<16>(tmp0a);
-                            tmp1a = leftShift<16>(tmp1a);
-                            tmp2a = leftShift<16>(tmp2a);
-                            tmp3a = leftShift<16>(tmp3a);
-                            tmp4a = leftShift<16>(tmp4a);
-
-                            tmp0 = _mm256_add_ps(tmp0, tmp0a);
-                            tmp1 = _mm256_add_ps(tmp1, tmp1a);
-                            tmp2 = _mm256_add_ps(tmp2, tmp2a);
-                            tmp3 = _mm256_add_ps(tmp3, tmp3a);
-                            tmp4 = _mm256_add_ps(tmp4, tmp4a);
-                            
-                            tmp0 = _mm256_add_ps(tmp0, _mm256_loadu_ps(delta_dst0 + 8 * n));
-                            tmp1 = _mm256_add_ps(tmp1, _mm256_loadu_ps(delta_dst1 + 8 * n));
-                            tmp2 = _mm256_add_ps(tmp2, _mm256_loadu_ps(delta_dst2 + 8 * n));
-                            tmp3 = _mm256_add_ps(tmp3, _mm256_loadu_ps(delta_dst3 + 8 * n));
-                            tmp4 = _mm256_add_ps(tmp4, _mm256_loadu_ps(delta_dst4 + 8 * n));
-                            _mm256_storeu_ps(delta_dst0 + 8 * n, tmp0);
-                            _mm256_storeu_ps(delta_dst1 + 8 * n, tmp1);
-                            _mm256_storeu_ps(delta_dst2 + 8 * n, tmp2);
-                            _mm256_storeu_ps(delta_dst3 + 8 * n, tmp3);
-                            _mm256_storeu_ps(delta_dst4 + 8 * n, tmp4);
-                            delta_src = next_delta_src;
-                            ++n;
-                        } while (n < nblocks);
-                        _mm_storeu_ps(delta_dst0 + 8 * nblocks, _mm256_castps256_ps128(remain0));
-                        _mm_storeu_ps(delta_dst1 + 8 * nblocks, _mm256_castps256_ps128(remain1));
-                        _mm_storeu_ps(delta_dst2 + 8 * nblocks, _mm256_castps256_ps128(remain2));
-                        _mm_storeu_ps(delta_dst3 + 8 * nblocks, _mm256_castps256_ps128(remain3));
-                        _mm_storeu_ps(delta_dst4 + 8 * nblocks, _mm256_castps256_ps128(remain4));
+                        }
                     }
-                    cnn_size_t x = nblocks * 8;
-                    if (x < out.width_) {
-                        __m256 delta_src = _mm256_broadcast_ss(pdelta_src + x);
-                        do {
-                            __m256 next_delta_src = _mm256_broadcast_ss(pdelta_src + x + 1);
-                            __m256 tmp0 = _mm256_mul_ps(w0a, delta_src);
-                            __m256 tmp1 = _mm256_mul_ps(w1a, delta_src);
-                            __m256 tmp2 = _mm256_mul_ps(w2a, delta_src);
-                            __m256 tmp3 = _mm256_mul_ps(w3a, delta_src);
-                            __m256 tmp4 = _mm256_mul_ps(w4a, delta_src);
-                            tmp0 = _mm256_add_ps(tmp0, _mm256_loadu_ps(delta_dst0 + x));
-                            tmp1 = _mm256_add_ps(tmp1, _mm256_loadu_ps(delta_dst1 + x));
-                            tmp2 = _mm256_add_ps(tmp2, _mm256_loadu_ps(delta_dst2 + x));
-                            tmp3 = _mm256_add_ps(tmp3, _mm256_loadu_ps(delta_dst3 + x));
-                            tmp4 = _mm256_add_ps(tmp4, _mm256_loadu_ps(delta_dst4 + x));
-                            _mm256_storeu_ps(delta_dst0 + x, tmp0);
-                            _mm256_storeu_ps(delta_dst1 + x, tmp1);
-                            _mm256_storeu_ps(delta_dst2 + x, tmp2);
-                            _mm256_storeu_ps(delta_dst3 + x, tmp3);
-                            _mm256_storeu_ps(delta_dst4 + x, tmp4);
-                            delta_src = next_delta_src;
-                            ++x;
-                        } while (x < out.width_);
+                    if (remainder) {
+                        __m256 delta_src0 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(0, 0, 0, 0));
+                        __m256 delta_src1 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(1, 1, 1, 1));
+                        __m256 delta_src2 = _mm256_permute_ps(delta_src, _MM_SHUFFLE(2, 2, 2, 2));
+                        __m256 tmp0 = _mm256_mul_ps(w0a, delta_src0);
+                        __m256 tmp1 = _mm256_mul_ps(w1a, delta_src0);
+                        __m256 tmp2 = _mm256_mul_ps(w2a, delta_src0);
+                        __m256 tmp3 = _mm256_mul_ps(w3a, delta_src0);
+                        __m256 tmp4 = _mm256_mul_ps(w4a, delta_src0);
+                        switch (remainder) {
+                        case 3:
+                            tmp0 = madd(w0c, delta_src2, tmp0);
+                            tmp1 = madd(w1c, delta_src2, tmp1);
+                            tmp2 = madd(w2c, delta_src2, tmp2);
+                            tmp3 = madd(w3c, delta_src2, tmp3);
+                            tmp4 = madd(w4c, delta_src2, tmp4);
+                        case 2:
+                            tmp0 = madd(w0b, delta_src1, tmp0);
+                            tmp1 = madd(w1b, delta_src1, tmp1);
+                            tmp2 = madd(w2b, delta_src1, tmp2);
+                            tmp3 = madd(w3b, delta_src1, tmp3);
+                            tmp4 = madd(w4b, delta_src1, tmp4);
+                        case 1:
+                            tmp0 = _mm256_add_ps(tmp0, _mm256_loadu_ps(delta_dst0 + nblocks * 4));
+                            tmp1 = _mm256_add_ps(tmp1, _mm256_loadu_ps(delta_dst1 + nblocks * 4));
+                            tmp2 = _mm256_add_ps(tmp2, _mm256_loadu_ps(delta_dst2 + nblocks * 4));
+                            tmp3 = _mm256_add_ps(tmp3, _mm256_loadu_ps(delta_dst3 + nblocks * 4));
+                            tmp4 = _mm256_add_ps(tmp4, _mm256_loadu_ps(delta_dst4 + nblocks * 4));
+                            _mm256_storeu_ps(delta_dst0 + nblocks * 4, tmp0);
+                            _mm256_storeu_ps(delta_dst1 + nblocks * 4, tmp1);
+                            _mm256_storeu_ps(delta_dst2 + nblocks * 4, tmp2);
+                            _mm256_storeu_ps(delta_dst3 + nblocks * 4, tmp3);
+                            _mm256_storeu_ps(delta_dst4 + nblocks * 4, tmp4);
+                            break;
+                        default:
+                            __assume(0);
+                        }
                     }
                     pdelta_src += out.width_;
                     pdelta_dst += h_stride2;
