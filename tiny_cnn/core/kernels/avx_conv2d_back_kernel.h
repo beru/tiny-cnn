@@ -41,7 +41,7 @@ namespace kernels {
 
 // float ver
 template <typename Allocator>
-void accumulate_db(const index3d<cnn_size_t>&           param_out,
+inline void accumulate_db(const index3d<cnn_size_t>&           param_out,
                    const std::vector<float, Allocator>& curr_delta,
                    std::vector<float, Allocator>&       db) {
     //fvec_t& db = *in_grad[2];
@@ -68,28 +68,36 @@ void accumulate_db(const index3d<cnn_size_t>&           param_out,
         __m256i mask = _mm256_loadu_si256((const __m256i*)(masks + 8 - remainder));
         for (cnn_size_t outc = 0; outc < param_out.depth_; outc++) {
             const float *delta = &curr_delta[param_out.get_index(0, 0, outc)];
-            __m256 sum = _mm256_setzero_ps();
-            for (size_t i=0; i<nblocks; ++i) {
-                sum = _mm256_add_ps(sum, _mm256_loadu_ps(delta + i*8));
+            __m256 sum0 = _mm256_setzero_ps();
+            __m256 sum1 = _mm256_setzero_ps();
+            for (size_t i=0; i<nblocks/2; ++i) {
+                sum0 = _mm256_add_ps(sum0, _mm256_loadu_ps(delta + i*16));
+                sum1 = _mm256_add_ps(sum1, _mm256_loadu_ps(delta + i*16+8));
             }
-            __m256 sum1 = _mm256_loadu_ps(delta + nblocks*8);
+            if (nblocks & 1) {
+                sum0 = _mm256_add_ps(sum0, _mm256_loadu_ps(delta + (nblocks - 1)*8));
+            }
+            sum0 = _mm256_add_ps(sum0, sum1);
+            sum1 = _mm256_loadu_ps(delta + nblocks*8);
             sum1 = _mm256_and_ps(sum1, _mm256_castsi256_ps(mask));
-            sum = _mm256_add_ps(sum, sum1);
-            db[outc] += _mm_cvtss_f32(hsum256_ps(sum));
+            sum0 = _mm256_add_ps(sum0, sum1);
+            db[outc] += _mm_cvtss_f32(hsum256_ps(sum0));
         }
     }
 }
 
-inline void accumulate_db(const index3d<cnn_size_t>& param_out,
-                          const vec_t&               curr_delta,
-                          vec_t&                     db) {
+// double ver
+template <typename Allocator>
+void accumulate_db(const index3d<cnn_size_t>&            param_out,
+                   const std::vector<double, Allocator>& curr_delta,
+                   std::vector<double, Allocator>&       db) {
     //vec_t& db = *in_grad[2];
     for (cnn_size_t outc = 0; outc < param_out.depth_; outc++) {
         cnn_size_t idx = param_out.get_index(0, 0, outc);
-        const float_t * delta = &curr_delta[idx];
-        const float_t * deltaa = delta + param_out.width_ *
+        const double * delta = &curr_delta[idx];
+        const double * deltaa = delta + param_out.width_ *
                                          param_out.height_;
-        db[outc] += std::accumulate(delta, deltaa, float_t(0));
+        db[outc] += std::accumulate(delta, deltaa, double(0));
     }
 }
 
