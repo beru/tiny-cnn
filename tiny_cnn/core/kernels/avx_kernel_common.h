@@ -363,14 +363,3 @@ inline __m256 rightShift<28>(__m256 x) {
     return y;
 }
 
-// http://stackoverflow.com/a/31927523/4699324
-// https://software.intel.com/en-us/blogs/2015/01/13/programming-using-avx2-permutations
-// http://d.hatena.ne.jp/berupon/20150211
-template <int n>
-inline __m256 leftFunnelShift(__m256 a, __m256 b) {
-    static_assert(foobar<n>::value, "unsupported shift amount");
-    return a;
-}
-
-
-

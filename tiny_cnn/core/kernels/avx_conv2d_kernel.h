@@ -288,11 +288,11 @@ void avx_conv2d_5x5_kernel(const conv_params& params,
                     __m256 tmp0 = _mm256_mul_ps(w0, i0);
                     __m256 tmp1 = _mm256_mul_ps(w1, i1);
                     __m256 tmp2 = _mm256_mul_ps(w2, i2);
-                    __m128 tmp3 = _mm_mul_ps(w3, i3);
+                    __m128 tmp3 = _mm_mul_ss(w3, i3);
                     sum0 = _mm256_add_ps(tmp0, sum0);
                     sum1 = _mm256_add_ps(tmp1, sum1);
                     sum2 = _mm256_add_ps(tmp2, sum2);
-                    sum3 = _mm_add_ps(tmp3, sum3);
+                    sum3 = _mm_add_ss(tmp3, sum3);
                 }
                 __m256 sum = _mm256_add_ps(_mm256_add_ps(sum0, sum1), sum2);
                 __m128 b = _mm_load_ss(&bias[o]);
@@ -302,39 +302,32 @@ void avx_conv2d_5x5_kernel(const conv_params& params,
             }
         } else {
             for (size_t o = 0; o < out.depth_; ++o) {
-                __m256 sum = _mm256_setzero_ps();
                 size_t widx = 25/* weight_.area() */ * params.in.depth_ * o;
                 size_t inidx = 0;
+                __m256 sum0 = _mm256_setzero_ps();
+                __m256 sum1 = _mm256_setzero_ps();
+                __m256 sum2 = _mm256_setzero_ps();
+                __m256 sum3 = _mm256_setzero_ps();
+                __m256 sum4 = _mm256_setzero_ps();
                 for (cnn_size_t inc = 0; inc < params.in.depth_; ++inc, widx += 25, inidx += inarea) {
                     if (!tbl.is_connected(o, inc)) {
                         continue;
                     }
                     const float* pw = (const float*) &W[widx];
-                    __m256 w0 = _mm256_loadu_ps(pw+0);
-                    __m256 w1 = _mm256_loadu_ps(pw+5);
-                    __m256 w2 = _mm256_loadu_ps(pw+10);
-                    __m256 w3 = _mm256_loadu_ps(pw+15);
-                    __m256 w4 = _mm256_loadu_ps(pw+20);
-                    w0 = _mm256_and_ps(w0, mask);
-                    w1 = _mm256_and_ps(w1, mask);
-                    w2 = _mm256_and_ps(w2, mask);
-                    w3 = _mm256_and_ps(w3, mask);
-                    w4 = _mm256_and_ps(w4, mask);
                     const float* pi = (const float*) &in[inidx];
-                    __m256 i0 = _mm256_loadu_ps(pi + 0 * stride);
-                    __m256 i1 = _mm256_loadu_ps(pi + 1 * stride);
-                    __m256 i2 = _mm256_loadu_ps(pi + 2 * stride);
-                    __m256 i3 = _mm256_loadu_ps(pi + 3 * stride);
-                    __m256 i4 = _mm256_loadu_ps(pi + 4 * stride);
-                    __m256 sum0 = madd(w0, i0, sum);
-                    __m256 sum1 = _mm256_mul_ps(w1, i1);
-                    sum0 = madd(w2, i2, sum0);
-                    sum1 = madd(w3, i3, sum1);
-                    sum0 = madd(w4, i4, sum0);
-                    sum = _mm256_add_ps(sum0, sum1);
+                    sum0 = madd(_mm256_loadu_ps(pw+0), _mm256_loadu_ps(pi + 0 * stride), sum0);
+                    sum1 = madd(_mm256_loadu_ps(pw+5), _mm256_loadu_ps(pi + 1 * stride), sum1);
+                    sum2 = madd(_mm256_loadu_ps(pw+10), _mm256_loadu_ps(pi + 2 * stride), sum2);
+                    sum3 = madd(_mm256_loadu_ps(pw+15), _mm256_loadu_ps(pi + 3 * stride), sum3);
+                    sum4 = madd(_mm256_loadu_ps(pw+20), _mm256_loadu_ps(pi + 4 * stride), sum4);
                 }
+                sum0 = _mm256_add_ps(sum0, sum1);
+                sum2 = _mm256_add_ps(sum2, sum3);
+                sum0 = _mm256_add_ps(sum0, sum2);
+                sum0 = _mm256_add_ps(sum0, sum4);
+                sum0 = _mm256_and_ps(sum0, mask);
                 __m128 b = _mm_load_ss(&bias[o]);
-                __m128 hsum = hsum256_ps(sum);
+                __m128 hsum = hsum256_ps(sum0);
                 hsum = madd(b, y_bias_scale, hsum);
                 _mm_store_ss(&a[o], hsum);
             }
