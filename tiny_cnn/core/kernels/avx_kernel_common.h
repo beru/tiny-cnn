@@ -83,7 +83,7 @@ inline __m128 hsum128_ps(__m128 x)
 }
 
 // in  : ( x7, x6, x5, x4, x3, x2, x1, x0 )
-// out : (  -,  -,  -,  -,  -,  -,  -, x7+x6+x5+x4+x3+x2+x1+x0 )
+// out : ( -,  -,  -, xsum )
 inline __m128 hsum256_ps(__m256 x) {
     // hiQuad = ( x7, x6, x5, x4 )
     const __m128 hiQuad = _mm256_extractf128_ps(x, 1);
@@ -109,7 +109,7 @@ inline __m128 hsum256_ps(__m256 x) {
 // Horizontally add elements of each __m256 type arguments at once
 // in a : ( a7, a6, a5, a4, a3, a2, a1, a0 )
 // in b : ( b7, b6, b5, b4, b3, b2, b1, b0 )
-// out  : (  -,  -,  -,  -,  -,  -, b1+b5+b3+b7+b0+b4+b2+b6, a1+a5+a3+a7+a0+a4+a2+a6 )
+// out  : ( -, -, bsum, asum )
 inline __m128 hsum2x256_ps(__m256 a, __m256 b) {
     // (b3, b2, b1, b0, a3, a2, a1, a0)
     __m256 x = _mm256_permute2f128_ps(a, b, 0x20);
@@ -129,6 +129,112 @@ inline __m128 hsum2x256_ps(__m256 a, __m256 b) {
     __m128 upper = _mm256_extractf128_ps(x, 1);
     // (-, -, -, -, -, -, b1+b5+b3+b7+b0+b4+b2+b6, a1+a5+a3+a7+a0+a4+a2+a6)
     __m128 ret = _mm_unpacklo_ps(_mm256_castps256_ps128(x), upper);
+    return ret;
+}
+
+// Horizontally add elements of each __m256 type arguments at once
+// in a : ( a7, a6, a5, a4, a3, a2, a1, a0 )
+// in b : ( b7, b6, b5, b4, b3, b2, b1, b0 )
+// in c : ( c7, c6, c5, c4, c3, c2, c1, c0 )
+// in d : ( d7, d6, d5, d4, d3, d2, d1, d0 )
+// out  : ( dsum, csum, bsum, asum )
+inline __m128 hsum4x256_ps(__m256 a, __m256 b, __m256 c, __m256 d) {
+
+    // (b3,b2,b1,b0, a3,a2,a1,a0)
+    __m256 w = _mm256_permute2f128_ps(a, b, 0x20);
+    // (b7,b6,b5,b4, a7,a6,a5,a4)
+    __m256 x = _mm256_permute2f128_ps(a, b, 0x31);
+    // (d3,d2,d1,d0, c3,c2,c1,c0)
+    __m256 y = _mm256_permute2f128_ps(c, d, 0x20);
+    // (d7,d6,d5,d4, c7,c6,c5,c4)
+    __m256 z = _mm256_permute2f128_ps(c, d, 0x31);
+    
+    // (b3,b2,b1,b0, a3,a2,a1,a0)
+    // (b7,b6,b5,b4, a7,a6,a5,a4)
+    w = _mm256_add_ps(w, x);
+    // (-,-,b3,b2, -,-,a3,a2)
+    // (-,-,b7,b6, -,-,a7,a6)
+    x = _mm256_permute_ps(w, _MM_SHUFFLE(3, 2, 3, 2));
+    // (-,-,b1,b0, -,-,a1,a0)
+    // (-,-,b5,b4, -,-,a5,a4)
+    // (-,-,b3,b2, -,-,a3,a2)
+    // (-,-,b7,b6, -,-,a7,a6)
+    w = _mm256_add_ps(w, x);
+    
+    // (d3,d2,d1,d0, c3,c2,c1,c0)
+    // (d7,d6,d5,d4, c7,c6,c5,c4)
+    y = _mm256_add_ps(y, z);
+    // (-,-,d3,d2, -,-,c3,c2)
+    // (-,-,d7,d6, -,-,c7,c6)
+    z = _mm256_permute_ps(y, _MM_SHUFFLE(3, 2, 3, 2));
+    // (-,-,d1,d0, -,-,c1,c0)
+    // (-,-,d5,d4, -,-,c5,c4)
+    // (-,-,d3,d2, -,-,c3,c2)
+    // (-,-,d7,d6, -,-,c7,c6)
+    z = _mm256_add_ps(y, z);
+    
+    // d1,d0,b1,b0, c1,c0,a1,a0)
+    // d5,d4,b5,b4, c5,c4,a5,a4)
+    // d3,d2,b3,b2, c3,c2,a3,a2)
+    // d7,d6,b7,b6, c7,c6,a7,a6)
+    w = _mm256_castpd_ps(_mm256_unpacklo_pd(_mm256_castps_pd(w), _mm256_castps_pd(z)));
+    
+    // (-,d1,-,b1, -,c1,-,a1)
+    // (-,d5,-,b5, -,c5,-,a5)
+    // (-,d3,-,b3, -,c3,-,a3)
+    // (-,d7,-,b7, -,c7,-,a7)
+    x = _mm256_permute_ps(w, _MM_SHUFFLE(3, 3, 1, 1));
+    
+    // (-,d1,-,b1, -,c1,-,a1)
+    // (-,d5,-,b5, -,c5,-,a5)
+    // (-,d3,-,b3, -,c3,-,a3)
+    // (-,d7,-,b7, -,c7,-,a7)
+    // (-,d0,-,b0, -,c0,-,a0)
+    // (-,d4,-,b4, -,c4,-,a4)
+    // (-,d2,-,b2, -,c2,-,a2)
+    // (-,d6,-,b6, -,c6,-,a6)
+    w = _mm256_add_ps(w, x);
+    
+    // (-,d1,-,b1)
+    // (-,d5,-,b5)
+    // (-,d3,-,b3)
+    // (-,d7,-,b7)
+    // (-,d0,-,b0)
+    // (-,d4,-,b4)
+    // (-,d2,-,b2)
+    // (-,d6,-,b6)
+    __m128 upper = _mm256_extractf128_ps(w, 1);
+    
+    // (-,-,b1,a1)
+    // (-,-,b5,a5)
+    // (-,-,b3,a3)
+    // (-,-,b7,a7)
+    // (-,-,b0,a0)
+    // (-,-,b4,a4)
+    // (-,-,b2,a2)
+    // (-,-,b6,a6)
+    __m128 lo = _mm_unpacklo_ps(_mm256_castps256_ps128(w), upper);
+    // (-,-,d1,c1)
+    // (-,-,d5,c5)
+    // (-,-,d3,c3)
+    // (-,-,d7,c7)
+    // (-,-,d0,c0)
+    // (-,-,d4,c4)
+    // (-,-,d2,c2)
+    // (-,-,d6,c6)
+    __m128 hi = _mm_unpackhi_ps(_mm256_castps256_ps128(w), upper);
+
+
+    // (d1,c1,b1,a1)
+    // (d5,c5,b5,a5)
+    // (d3,c3,b3,a3)
+    // (d7,c7,b7,a7)
+    // (d0,c0,b0,a0)
+    // (d4,c4,b4,a4)
+    // (d2,c2,b2,a2)
+    // (d6,c6,b6,a6)
+    __m128 ret = _mm_castpd_ps(_mm_unpacklo_pd(_mm_castps_pd(lo), _mm_castps_pd(hi)));
+    
     return ret;
 }
 

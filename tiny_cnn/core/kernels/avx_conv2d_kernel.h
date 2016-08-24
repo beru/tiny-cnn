@@ -420,12 +420,10 @@ void avx_conv2d_5x5_kernel(const conv_params& params,
                             dst3 = madd(w3d, i3, dst3);
                             dst0 = madd(w4a, i4, dst0);
                             dst1 = madd(w4b, i4, dst1);
-                            __m128 hsum01 = hsum2x256_ps(dst0, dst1);
                             dst2 = madd(w4c, i4, dst2);
                             dst3 = madd(w4d, i4, dst3);
-                            __m128 hsum23 = hsum2x256_ps(dst2, dst3);
-                            __m128 sum2 = _mm_castpd_ps(_mm_unpacklo_pd(_mm_castps_pd(hsum01), _mm_castps_pd(hsum23)));
-                            sum = _mm_add_ps(sum, sum2);
+                            __m128 hsum0123 = hsum4x256_ps(dst0, dst1, dst2, dst3);
+                            sum = _mm_add_ps(sum, hsum0123);
                             _mm_storeu_ps(ppa2, sum);
                             pi0 += 4;
                             pi1 += 4;
