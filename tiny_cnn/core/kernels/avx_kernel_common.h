@@ -179,51 +179,31 @@ inline __m128 hsum4x256_ps(__m256 a, __m256 b, __m256 c, __m256 d) {
     // d7,d6,b7,b6, c7,c6,a7,a6)
     w = _mm256_castpd_ps(_mm256_unpacklo_pd(_mm256_castps_pd(w), _mm256_castps_pd(z)));
     
-    // (-,d1,-,b1, -,c1,-,a1)
-    // (-,d5,-,b5, -,c5,-,a5)
-    // (-,d3,-,b3, -,c3,-,a3)
-    // (-,d7,-,b7, -,c7,-,a7)
-    x = _mm256_permute_ps(w, _MM_SHUFFLE(3, 3, 1, 1));
+    // (d0,d1,b0,b1, c0,c1,a0,a1)
+    // (d4,d5,b4,b5, c4,c5,a4,a5)
+    // (d2,d3,b2,b3, c2,c3,a2,a3)
+    // (d6,d7,b6,b7, c6,c7,a6,a7)
+    x = _mm256_permute_ps(w, _MM_SHUFFLE(2, 3, 0, 1));
     
-    // (-,d1,-,b1, -,c1,-,a1)
-    // (-,d5,-,b5, -,c5,-,a5)
-    // (-,d3,-,b3, -,c3,-,a3)
-    // (-,d7,-,b7, -,c7,-,a7)
-    // (-,d0,-,b0, -,c0,-,a0)
-    // (-,d4,-,b4, -,c4,-,a4)
-    // (-,d2,-,b2, -,c2,-,a2)
-    // (-,d6,-,b6, -,c6,-,a6)
+    // (d1,d1,b1,b1, c1,c1,a1,a1)
+    // (d5,d5,b5,b5, c5,c5,a5,a5)
+    // (d3,d3,b3,b3, c3,c3,a3,a3)
+    // (d7,d7,b7,b7, c7,c7,a7,a7)
+    // (d0,d0,b0,b0, c0,c0,a0,a0)
+    // (d4,d4,b4,b4, c4,c4,a4,a4)
+    // (d2,d2,b2,b2, c2,c2,a2,a2)
+    // (d6,d6,b6,b6, c6,c6,a6,a6)
     w = _mm256_add_ps(w, x);
-    
-    // (-,d1,-,b1)
-    // (-,d5,-,b5)
-    // (-,d3,-,b3)
-    // (-,d7,-,b7)
-    // (-,d0,-,b0)
-    // (-,d4,-,b4)
-    // (-,d2,-,b2)
-    // (-,d6,-,b6)
-    __m128 upper = _mm256_extractf128_ps(w, 1);
-    
-    // (-,-,b1,a1)
-    // (-,-,b5,a5)
-    // (-,-,b3,a3)
-    // (-,-,b7,a7)
-    // (-,-,b0,a0)
-    // (-,-,b4,a4)
-    // (-,-,b2,a2)
-    // (-,-,b6,a6)
-    __m128 lo = _mm_unpacklo_ps(_mm256_castps256_ps128(w), upper);
-    // (-,-,d1,c1)
-    // (-,-,d5,c5)
-    // (-,-,d3,c3)
-    // (-,-,d7,c7)
-    // (-,-,d0,c0)
-    // (-,-,d4,c4)
-    // (-,-,d2,c2)
-    // (-,-,d6,c6)
-    __m128 hi = _mm_unpackhi_ps(_mm256_castps256_ps128(w), upper);
 
+    // (d1,d1,b1,b1)
+    // (d5,d5,b5,b5)
+    // (d3,d3,b3,b3)
+    // (d7,d7,b7,b7)
+    // (d0,d0,b0,b0)
+    // (d4,d4,b4,b4)
+    // (d2,d2,b2,b2)
+    // (d6,d6,b6,b6)
+    __m128 upper = _mm256_extractf128_ps(w, 1);
 
     // (d1,c1,b1,a1)
     // (d5,c5,b5,a5)
@@ -233,7 +213,7 @@ inline __m128 hsum4x256_ps(__m256 a, __m256 b, __m256 c, __m256 d) {
     // (d4,c4,b4,a4)
     // (d2,c2,b2,a2)
     // (d6,c6,b6,a6)
-    __m128 ret = _mm_castpd_ps(_mm_unpacklo_pd(_mm_castps_pd(lo), _mm_castps_pd(hi)));
+    __m128 ret = _mm_blend_ps(_mm256_castps256_ps128(w), upper, 0x0A /* 0b1010 */);
     
     return ret;
 }
