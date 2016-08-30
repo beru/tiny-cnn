@@ -31,7 +31,7 @@
 
 #if defined(CNN_USE_AVX)
 
-#include "avx_kernel_common.h"
+#include "avx_common.h"
 
 #endif // #if defined(CNN_USE_AVX)
 
