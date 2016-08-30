@@ -86,8 +86,8 @@ void train_lenet(std::string data_dir_path) {
 
     progress_display disp(train_images.size());
     timer t;
-    int minibatch_size = std::thread::hardware_concurrency() * 3;
-    int num_epochs = 15;
+    int minibatch_size = 16;
+    int num_epochs = 5;
 
     optimizer.alpha *= (tiny_cnn::float_t) std::sqrt(minibatch_size);
 
