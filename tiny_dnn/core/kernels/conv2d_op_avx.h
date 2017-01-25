@@ -84,9 +84,15 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
       _mm_store_ss(&a[o], _mm_add_ss(hsum, b));
     }
   } else {
-    const serial_size_t nblocks = out.width_ / 4;
+    const size_t n12 = out.width_ / 12;
+    const size_t n4 = (out.width_ % 12) / 4;
+    const size_t n1 = out.width_ % 4;
+    //const serial_size_t n4 = out.width_ / 4;
+    float w0[24], w1[24], w2[24], w3[24], w4[24];
+    auto zero = _mm256_setzero_ps();
     for (serial_size_t o = 0; o < out.depth_; ++o, oidx += out_area) {
       float *pa = &a[oidx];
+#if 0
       // init to bias value
       float b = bias[o] * bias_scale;
       {
@@ -109,143 +115,224 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
           pa[i] = b;
         }
       }
+#endif
       for (serial_size_t inc = 0; inc < params.in.depth_; ++inc) {
         if (!tbl.is_connected(o, inc)) continue;
 
-        const float *pw = (const float *)&W[25 * (params.in.depth_ * o + inc)];
+        int widx = 25 * (params.in.depth_ * o + inc);
+        assert(widx < W.size());
+        const float *pw = (const float *)&W[widx];
         const float *pi = (const float *)&in[in_padded.get_index(0, 0, inc)];
-
-        __m256 w0a = _mm256_maskload_ps(pw + 0, imask);
-        __m256 w1a = _mm256_maskload_ps(pw + 5, imask);
-        __m256 w2a = _mm256_maskload_ps(pw + 10, imask);
-        __m256 w3a = _mm256_maskload_ps(pw + 15, imask);
-        __m256 w4a = _mm256_maskload_ps(pw + 20, imask);
-        __m256 w0b = leftShift<4>(w0a);
-        __m256 w1b = leftShift<4>(w1a);
-        __m256 w2b = leftShift<4>(w2a);
-        __m256 w3b = leftShift<4>(w3a);
-        __m256 w4b = leftShift<4>(w4a);
-        __m256 w0c = leftShift<8>(w0a);
-        __m256 w1c = leftShift<8>(w1a);
-        __m256 w2c = leftShift<8>(w2a);
-        __m256 w3c = leftShift<8>(w3a);
-        __m256 w4c = leftShift<8>(w4a);
-        __m256 w0d = leftShift<12>(w0a);
-        __m256 w1d = leftShift<12>(w1a);
-        __m256 w2d = leftShift<12>(w2a);
-        __m256 w3d = leftShift<12>(w3a);
-        __m256 w4d = leftShift<12>(w4a);
         float *ppa = pa;
         if (w_stride == 1) {
-          if (nblocks) {
-            for (serial_size_t y = 0; y < out.height_; ++y, ppa += out.width_) {
-              const float *pi0 = (pi + y * stride);
-              const float *pi1 = pi0 + 1 * in_padded.width_;
-              const float *pi2 = pi0 + 2 * in_padded.width_;
-              const float *pi3 = pi0 + 3 * in_padded.width_;
-              const float *pi4 = pi0 + 4 * in_padded.width_;
-              __m256 dst0, dst1, dst2, dst3;
-              __m256 i0       = _mm256_loadu_ps(pi0);
-              __m256 i1       = _mm256_loadu_ps(pi1);
-              __m256 i2       = _mm256_loadu_ps(pi2);
-              __m256 i3       = _mm256_loadu_ps(pi3);
-              __m256 i4       = _mm256_loadu_ps(pi4);
-              dst0            = _mm256_mul_ps(w0a, i0);
-              dst1            = _mm256_mul_ps(w0b, i0);
-              dst2            = _mm256_mul_ps(w0c, i0);
-              dst3            = _mm256_mul_ps(w0d, i0);
-              dst0            = madd256_ps(w1a, i1, dst0);
-              dst1            = madd256_ps(w1b, i1, dst1);
-              dst2            = madd256_ps(w1c, i1, dst2);
-              dst3            = madd256_ps(w1d, i1, dst3);
-              dst0            = madd256_ps(w2a, i2, dst0);
-              dst1            = madd256_ps(w2b, i2, dst1);
-              dst2            = madd256_ps(w2c, i2, dst2);
-              dst3            = madd256_ps(w2d, i2, dst3);
-              dst0            = madd256_ps(w3a, i3, dst0);
-              dst1            = madd256_ps(w3b, i3, dst1);
-              dst2            = madd256_ps(w3c, i3, dst2);
-              dst3            = madd256_ps(w3d, i3, dst3);
-              dst0            = madd256_ps(w4a, i4, dst0);
-              dst1            = madd256_ps(w4b, i4, dst1);
-              dst2            = madd256_ps(w4c, i4, dst2);
-              dst3            = madd256_ps(w4d, i4, dst3);
-              __m128 sum      = _mm_loadu_ps(ppa);
-              __m128 hsum0123 = hsum4x256_ps(dst0, dst1, dst2, dst3);
-              sum             = _mm_add_ps(sum, hsum0123);
-              _mm_storeu_ps(ppa, sum);
-              for (size_t i = 1; i < nblocks; ++i) {
-                i0       = _mm256_loadu_ps(pi0 + i * 4);
-                i1       = _mm256_loadu_ps(pi1 + i * 4);
-                i2       = _mm256_loadu_ps(pi2 + i * 4);
-                i3       = _mm256_loadu_ps(pi3 + i * 4);
-                i4       = _mm256_loadu_ps(pi4 + i * 4);
-                dst0     = _mm256_mul_ps(w0a, i0);
-                dst1     = _mm256_mul_ps(w0b, i0);
-                dst2     = _mm256_mul_ps(w0c, i0);
-                dst3     = _mm256_mul_ps(w0d, i0);
-                dst0     = madd256_ps(w1a, i1, dst0);
-                dst1     = madd256_ps(w1b, i1, dst1);
-                dst2     = madd256_ps(w1c, i1, dst2);
-                dst3     = madd256_ps(w1d, i1, dst3);
-                dst0     = madd256_ps(w2a, i2, dst0);
-                dst1     = madd256_ps(w2b, i2, dst1);
-                dst2     = madd256_ps(w2c, i2, dst2);
-                dst3     = madd256_ps(w2d, i2, dst3);
-                dst0     = madd256_ps(w3a, i3, dst0);
-                dst1     = madd256_ps(w3b, i3, dst1);
-                dst2     = madd256_ps(w3c, i3, dst2);
-                dst3     = madd256_ps(w3d, i3, dst3);
-                dst0     = madd256_ps(w4a, i4, dst0);
-                dst1     = madd256_ps(w4b, i4, dst1);
-                dst2     = madd256_ps(w4c, i4, dst2);
-                dst3     = madd256_ps(w4d, i4, dst3);
-                sum      = _mm_loadu_ps(ppa + i * 4);
-                hsum0123 = hsum4x256_ps(dst0, dst1, dst2, dst3);
+          std::copy(pw+0, pw+5, w0);
+          std::copy(pw+0, pw+5, w0+5);
+          std::copy(pw+0, pw+5, w0+10);
+          std::copy(pw+0, pw+5, w0+15);
+          std::copy(pw+0, pw+4, w0+20);
+          __m256 w0s = zero;//_mm256_loadu_ps(pw);
+          __m256 w1s = zero;//_mm256_loadu_ps(pw + 5);
+          __m256 w2s = zero;//_mm256_loadu_ps(pw + 10);
+          __m256 w3s = zero;//_mm256_loadu_ps(pw + 15);
+          __m256 w4s = zero;//_mm256_loadu_ps(pw + 20);
+          //_mm256_storeu_ps(w0 + 0, w0s);
+          //_mm256_storeu_ps(w0 + 5, w0s);
+          //_mm256_storeu_ps(w0 + 10, w0s);
+          //_mm256_storeu_ps(w0 + 15, w0s);
+          //_mm_storeu_ps(w0 + 20, _mm256_castps256_ps128(w0s));
+          _mm256_storeu_ps(w1 + 0, w1s);
+          _mm256_storeu_ps(w1 + 5, w1s);
+          _mm256_storeu_ps(w1 + 10, w1s);
+          _mm256_storeu_ps(w1 + 15, w1s);
+          _mm_storeu_ps(w1 + 20, _mm256_castps256_ps128(w1s));
+          _mm256_storeu_ps(w2 + 0, w2s);
+          _mm256_storeu_ps(w2 + 5, w2s);
+          _mm256_storeu_ps(w2 + 10, w2s);
+          _mm256_storeu_ps(w2 + 15, w2s);
+          _mm_storeu_ps(w2 + 20, _mm256_castps256_ps128(w2s));
+          _mm256_storeu_ps(w3 + 0, w3s);
+          _mm256_storeu_ps(w3 + 5, w3s);
+          _mm256_storeu_ps(w3 + 10, w3s);
+          _mm256_storeu_ps(w3 + 15, w3s);
+          _mm_storeu_ps(w3 + 20, _mm256_castps256_ps128(w3s));
+          _mm256_storeu_ps(w4 + 0, w4s);
+          _mm256_storeu_ps(w4 + 5, w4s);
+          _mm256_storeu_ps(w4 + 10, w4s);
+          _mm256_storeu_ps(w4 + 15, w4s);
+          _mm_storeu_ps(w4 + 20, _mm256_castps256_ps128(w4s));
+          for (serial_size_t y = 0; y < out.height_; ++y, ppa += out.width_) {
+            const float *pi0 = (pi + y * stride);
+            const float *pi1 = pi0 + 1 * in_padded.width_;
+            const float *pi2 = pi0 + 2 * in_padded.width_;
+            const float *pi3 = pi0 + 3 * in_padded.width_;
+            const float *pi4 = pi0 + 4 * in_padded.width_;
+            for (size_t i = 0; i < n12; ++i) {
+              __m256 i0 = _mm256_loadu_ps(pi0 + i * 12);
+              __m256 i1 = _mm256_loadu_ps(pi1 + i * 12);
+              __m256 i2 = _mm256_loadu_ps(pi2 + i * 12);
+              __m256 i3 = _mm256_loadu_ps(pi3 + i * 12);
+              __m256 i4 = _mm256_loadu_ps(pi4 + i * 12);
+              static const int o00 = 0;
+              static const int o01 = 4;
+              static const int o02 = 8;
+              static const int o03 = 12;
+              static const int o04 = 16;
+              __m256 s00 = _mm256_mul_ps(i0, _mm256_loadu_ps(w0 + o00));
+              __m256 s01 = _mm256_mul_ps(i0, _mm256_loadu_ps(w0 + o01));
+              __m256 s02 = _mm256_mul_ps(i0, _mm256_loadu_ps (w0 + o02));
+              __m256 s03 = _mm256_mul_ps(i0, _mm256_loadu_ps(w0 + o03));
+              __m256 s04 = _mm256_mul_ps(i0, _mm256_loadu_ps (w0 + o04));
+              s00 = madd256_ps(s00, i1, _mm256_load_ps (w1 + o00));
+              s01 = madd256_ps(s01, i1, _mm256_loadu_ps(w1 + o01));
+              s02 = madd256_ps(s02, i1, _mm256_load_ps (w1 + o02));
+              s03 = madd256_ps(s03, i1, _mm256_loadu_ps(w1 + o03));
+              s04 = madd256_ps(s04, i1, _mm256_load_ps (w1 + o04));
+              s00 = madd256_ps(s00, i2, _mm256_load_ps (w2 + o00));
+              s01 = madd256_ps(s01, i2, _mm256_loadu_ps(w2 + o01));
+              s02 = madd256_ps(s02, i2, _mm256_load_ps (w2 + o02));
+              s03 = madd256_ps(s03, i2, _mm256_loadu_ps(w2 + o03));
+              s04 = madd256_ps(s04, i2, _mm256_load_ps (w2 + o04));
+              s00 = madd256_ps(s00, i3, _mm256_load_ps (w3 + o00));
+              s01 = madd256_ps(s01, i3, _mm256_loadu_ps(w3 + o01));
+              s02 = madd256_ps(s02, i3, _mm256_load_ps (w3 + o02));
+              s03 = madd256_ps(s03, i3, _mm256_loadu_ps(w3 + o03));
+              s04 = madd256_ps(s04, i3, _mm256_load_ps (w3 + o04));
+              s00 = madd256_ps(s00, i4, _mm256_load_ps (w4 + o00));
+              s01 = madd256_ps(s01, i4, _mm256_loadu_ps(w4 + o01));
+              s02 = madd256_ps(s02, i4, _mm256_load_ps (w4 + o02));
+              s03 = madd256_ps(s03, i4, _mm256_loadu_ps(w4 + o03));
+              s04 = madd256_ps(s04, i4, _mm256_load_ps (w4 + o04));
+              {
+                __m256 v0 = _mm256_blend_ps(zero, s00, 0b00011111);
+                __m256 v1 = _mm256_blend_ps(zero, s01, 0b00111110);
+                __m256 v2 = _mm256_blend_ps(zero, s02, 0b01111100);
+                __m256 v3 = _mm256_blend_ps(zero, s03, 0b11111000);
+                __m128 sum      = _mm_loadu_ps(ppa + i * 12);
+                __m128 hsum0123 = hsum4x256_ps(v0, v1, v2, v3);
                 sum      = _mm_add_ps(sum, hsum0123);
-                _mm_storeu_ps(ppa + i * 4, sum);
+                _mm_storeu_ps(ppa + i * 12, sum);
               }
-              for (serial_size_t x = nblocks * 4; x < out.width_; ++x) {
-                sum         = _mm_load_ss(&ppa[x]);
-                i0          = _mm256_loadu_ps(pi0 + x);
-                i1          = _mm256_loadu_ps(pi1 + x);
-                i2          = _mm256_loadu_ps(pi2 + x);
-                i3          = _mm256_loadu_ps(pi3 + x);
-                i4          = _mm256_loadu_ps(pi4 + x);
-                __m256 sum0 = _mm256_mul_ps(w0a, i0);
-                __m256 sum1 = _mm256_mul_ps(w1a, i1);
-                sum0        = madd256_ps(w2a, i2, sum0);
-                sum1        = madd256_ps(w3a, i3, sum1);
-                sum0        = madd256_ps(w4a, i4, sum0);
-                sum0        = _mm256_add_ps(sum0, sum1);
-                _mm_store_ss(&ppa[x], _mm_add_ss(sum, hsum256_ps(sum0)));
-              }     // x loop
-            }       // y loop
-          } else {  // if (nblocks) {
-            for (serial_size_t y = 0; y < out.height_; ++y, ppa += out.width_) {
-              const float *pi0 = (pi + y * stride);
-              const float *pi1 = pi0 + 1 * in_padded.width_;
-              const float *pi2 = pi0 + 2 * in_padded.width_;
-              const float *pi3 = pi0 + 3 * in_padded.width_;
-              const float *pi4 = pi0 + 4 * in_padded.width_;
-              for (serial_size_t x = 0; x < out.width_; ++x) {
-                __m128 sum  = _mm_load_ss(&ppa[x]);
-                __m256 i0   = _mm256_loadu_ps(pi0 + x);
-                __m256 i1   = _mm256_loadu_ps(pi1 + x);
-                __m256 i2   = _mm256_loadu_ps(pi2 + x);
-                __m256 i3   = _mm256_loadu_ps(pi3 + x);
-                __m256 i4   = _mm256_loadu_ps(pi4 + x);
-                __m256 sum0 = _mm256_mul_ps(w0a, i0);
-                __m256 sum1 = _mm256_mul_ps(w1a, i1);
-                sum0        = madd256_ps(w2a, i2, sum0);
-                sum1        = madd256_ps(w3a, i3, sum1);
-                sum0        = madd256_ps(w4a, i4, sum0);
-                sum0        = _mm256_add_ps(sum0, sum1);
-                _mm_store_ss(&ppa[x], _mm_add_ss(sum, hsum256_ps(sum0)));
-              }  // x loop
-            }    // y loop
-          }
+              i0 = _mm256_loadu_ps(pi0 + i * 12 + 8);
+              i1 = _mm256_loadu_ps(pi1 + i * 12 + 8);
+              i2 = _mm256_loadu_ps(pi2 + i * 12 + 8);
+              i3 = _mm256_loadu_ps(pi3 + i * 12 + 8);
+              i4 = _mm256_loadu_ps(pi4 + i * 12 + 8);
+              static const int o10 = 8;
+              static const int o11 = 12;
+              static const int o12 = 16;
+              static const int o13 = 0;
+              static const int o14 = 4;
+              __m256 s10 = _mm256_mul_ps(i0, _mm256_load_ps (w0 + o10));
+              __m256 s11 = _mm256_mul_ps(i0, _mm256_loadu_ps(w0 + o11));
+              __m256 s12 = _mm256_mul_ps(i0, _mm256_load_ps (w0 + o12));
+              __m256 s13 = _mm256_mul_ps(i0, _mm256_loadu_ps(w0 + o13));
+              __m256 s14 = _mm256_mul_ps(i0, _mm256_load_ps (w0 + o14));
+              s10 = madd256_ps(s10, i1, _mm256_load_ps (w1 + o10));
+              s11 = madd256_ps(s11, i1, _mm256_loadu_ps(w1 + o11));
+              s12 = madd256_ps(s12, i1, _mm256_load_ps (w1 + o12));
+              s13 = madd256_ps(s13, i1, _mm256_loadu_ps(w1 + o13));
+              s14 = madd256_ps(s14, i1, _mm256_load_ps (w1 + o14));
+              s10 = madd256_ps(s10, i2, _mm256_load_ps (w2 + o10));
+              s11 = madd256_ps(s11, i2, _mm256_loadu_ps(w2 + o11));
+              s12 = madd256_ps(s12, i2, _mm256_load_ps (w2 + o12));
+              s13 = madd256_ps(s13, i2, _mm256_loadu_ps(w2 + o13));
+              s14 = madd256_ps(s14, i2, _mm256_load_ps (w2 + o14));
+              s10 = madd256_ps(s10, i3, _mm256_load_ps (w3 + o10));
+              s11 = madd256_ps(s11, i3, _mm256_loadu_ps(w3 + o11));
+              s12 = madd256_ps(s12, i3, _mm256_load_ps (w3 + o12));
+              s13 = madd256_ps(s13, i3, _mm256_loadu_ps(w3 + o13));
+              s14 = madd256_ps(s14, i3, _mm256_load_ps (w3 + o14));
+              s10 = madd256_ps(s10, i4, _mm256_load_ps (w4 + o10));
+              s11 = madd256_ps(s11, i4, _mm256_loadu_ps(w4 + o11));
+              s12 = madd256_ps(s12, i4, _mm256_load_ps (w4 + o12));
+              s13 = madd256_ps(s13, i4, _mm256_loadu_ps(w4 + o13));
+              s14 = madd256_ps(s14, i4, _mm256_load_ps (w4 + o14));
+              {
+                s04 = _mm256_blend_ps(zero, s04, 0b11110000);
+                s00 = _mm256_blend_ps(zero, s00, 0b11100000);
+                s01 = _mm256_blend_ps(zero, s01, 0b11000000);
+                s02 = _mm256_blend_ps(zero, s02, 0b10000000);
+                __m256 v0 = _mm256_blend_ps(s14, s04, 0b00000001);
+                __m256 v1 = _mm256_blend_ps(s10, s00, 0b00000011);
+                __m256 v2 = _mm256_blend_ps(s11, s01, 0b00000111);
+                __m256 v3 = _mm256_blend_ps(s12, s02, 0b00001111);
+                __m128 sum      = _mm_loadu_ps(ppa + i * 12 + 4);
+                __m128 hsum0123 = hsum4x256_ps(v0, v1, v2, v3);
+                sum      = _mm_add_ps(sum, hsum0123);
+                _mm_storeu_ps(ppa + i * 12 + 4, sum);
+                v0 = _mm256_blend_ps(zero, s13, 0b11100000);
+                v1 = _mm256_blend_ps(zero, s14, 0b11000001);
+                v2 = _mm256_blend_ps(zero, s10, 0b10000011);
+                v3 = _mm256_blend_ps(zero, s11, 0b00000111);
+                sum      = _mm_loadu_ps(ppa + i * 12 + 8);
+                hsum0123 = hsum4x256_ps(v0, v1, v2, v3);
+                sum      = _mm_add_ps(sum, hsum0123);
+                _mm_storeu_ps(ppa + i * 12 + 8, sum);
+              }
+            }
+            pi0 += n12 * 12;
+            pi1 += n12 * 12;
+            pi2 += n12 * 12;
+            pi3 += n12 * 12;
+            pi4 += n12 * 12;
+            ppa += n12 * 12;
+#if 0
+            for (size_t i = 0; i < n4; ++i) {
+              __m256 i0       = _mm256_loadu_ps(pi0 + i * 4);
+              __m256 i1       = _mm256_loadu_ps(pi1 + i * 4);
+              __m256 i2       = _mm256_loadu_ps(pi2 + i * 4);
+              __m256 i3       = _mm256_loadu_ps(pi3 + i * 4);
+              __m256 i4       = _mm256_loadu_ps(pi4 + i * 4);
+              __m256 dst0     = _mm256_mul_ps(w0a, i0);
+              __m256 dst1     = _mm256_mul_ps(w0b, i0);
+              __m256 dst2     = _mm256_mul_ps(w0c, i0);
+              __m256 dst3     = _mm256_mul_ps(w0d, i0);
+              dst0     = madd256_ps(w1a, i1, dst0);
+              dst1     = madd256_ps(w1b, i1, dst1);
+              dst2     = madd256_ps(w1c, i1, dst2);
+              dst3     = madd256_ps(w1d, i1, dst3);
+              dst0     = madd256_ps(w2a, i2, dst0);
+              dst1     = madd256_ps(w2b, i2, dst1);
+              dst2     = madd256_ps(w2c, i2, dst2);
+              dst3     = madd256_ps(w2d, i2, dst3);
+              dst0     = madd256_ps(w3a, i3, dst0);
+              dst1     = madd256_ps(w3b, i3, dst1);
+              dst2     = madd256_ps(w3c, i3, dst2);
+              dst3     = madd256_ps(w3d, i3, dst3);
+              dst0     = madd256_ps(w4a, i4, dst0);
+              dst1     = madd256_ps(w4b, i4, dst1);
+              dst2     = madd256_ps(w4c, i4, dst2);
+              dst3     = madd256_ps(w4d, i4, dst3);
+              __m128 sum      = _mm_loadu_ps(ppa + i * 4);
+              __m128 hsum0123 = hsum4x256_ps(dst0, dst1, dst2, dst3);
+              sum      = _mm_add_ps(sum, hsum0123);
+              _mm_storeu_ps(ppa + i * 4, sum);
+            }
+            pi0 += n4 * 4;
+            pi1 += n4 * 4;
+            pi2 += n4 * 4;
+            pi3 += n4 * 4;
+            pi4 += n4 * 4;
+            ppa += n4 * 4;
+            for (size_t i = 0; i < n1; ++i) {
+              __m128 sum         = _mm_load_ss(&ppa[i]);
+              __m256 i0          = _mm256_loadu_ps(pi0 + i);
+              __m256 i1          = _mm256_loadu_ps(pi1 + i);
+              __m256 i2          = _mm256_loadu_ps(pi2 + i);
+              __m256 i3          = _mm256_loadu_ps(pi3 + i);
+              __m256 i4          = _mm256_loadu_ps(pi4 + i);
+              __m256 sum0 = _mm256_mul_ps(w0a, i0);
+              __m256 sum1 = _mm256_mul_ps(w1a, i1);
+              sum0        = madd256_ps(w2a, i2, sum0);
+              sum1        = madd256_ps(w3a, i3, sum1);
+              sum0        = madd256_ps(w4a, i4, sum0);
+              sum0        = _mm256_add_ps(sum0, sum1);
+              _mm_store_ss(&ppa[i], _mm_add_ss(sum, hsum256_ps(sum0)));
+            }     // x loop
+#endif
+          }       // y loop
         } else {  // if (w_stride == 1) {
+#if 0
           for (serial_size_t y = 0; y < out.height_; ++y, ppa += out.width_) {
             const float *pi0 = (pi + y * stride);
             const float *pi1 = pi0 + 1 * in_padded.width_;
@@ -273,6 +360,7 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
               pi4 += w_stride;
             }  // x loop
           }    // y loop
+#endif
         }
       }  // in depth loop
     }    // out depth loop
@@ -457,10 +545,10 @@ inline void conv2d_op_avx(const tensor_t &in_data,
 #ifdef CNN_USE_AVX
   if (params.weight.height_ == 5 && params.weight.width_ == 5) {
     // @todo consider better parallelization
-    for_i(layer_parallelize, in_data.size(), [&](int i) {
+    for (int i=0; i<in_data.size(); ++i) {
       avx_conv2d_5x5_kernel(params, in_data[i], W, bias, out_data[i],
                             layer_parallelize);
-    });
+    }
     return;
   }
 #endif
