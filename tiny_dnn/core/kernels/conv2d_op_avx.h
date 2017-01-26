@@ -92,7 +92,7 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
     auto zero = _mm256_setzero_ps();
     for (serial_size_t o = 0; o < out.depth_; ++o, oidx += out_area) {
       float *pa = &a[oidx];
-#if 0
+#if 1
       // init to bias value
       float b = bias[o] * bias_scale;
       {
@@ -120,26 +120,21 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
         if (!tbl.is_connected(o, inc)) continue;
 
         int widx = 25 * (params.in.depth_ * o + inc);
-        assert(widx < W.size());
         const float *pw = (const float *)&W[widx];
+        assert(widx + 25 <= W.size());
         const float *pi = (const float *)&in[in_padded.get_index(0, 0, inc)];
         float *ppa = pa;
-        if (w_stride == 1) {
-          std::copy(pw+0, pw+5, w0);
-          std::copy(pw+0, pw+5, w0+5);
-          std::copy(pw+0, pw+5, w0+10);
-          std::copy(pw+0, pw+5, w0+15);
-          std::copy(pw+0, pw+4, w0+20);
-          __m256 w0s = zero;//_mm256_loadu_ps(pw);
-          __m256 w1s = zero;//_mm256_loadu_ps(pw + 5);
-          __m256 w2s = zero;//_mm256_loadu_ps(pw + 10);
-          __m256 w3s = zero;//_mm256_loadu_ps(pw + 15);
-          __m256 w4s = zero;//_mm256_loadu_ps(pw + 20);
-          //_mm256_storeu_ps(w0 + 0, w0s);
-          //_mm256_storeu_ps(w0 + 5, w0s);
-          //_mm256_storeu_ps(w0 + 10, w0s);
-          //_mm256_storeu_ps(w0 + 15, w0s);
-          //_mm_storeu_ps(w0 + 20, _mm256_castps256_ps128(w0s));
+        if (1 || w_stride == 1) {
+          __m256 w0s = _mm256_loadu_ps(pw);
+          __m256 w1s = _mm256_loadu_ps(pw + 5);
+          __m256 w2s = _mm256_loadu_ps(pw + 10);
+          __m256 w3s = _mm256_loadu_ps(pw + 15);
+          __m256 w4s = _mm256_loadu_ps(pw + 20);
+          _mm256_storeu_ps(w0 + 0, w0s);
+          _mm256_storeu_ps(w0 + 5, w0s);
+          _mm256_storeu_ps(w0 + 10, w0s);
+          _mm256_storeu_ps(w0 + 15, w0s);
+          _mm_storeu_ps(w0 + 20, _mm256_castps256_ps128(w0s));
           _mm256_storeu_ps(w1 + 0, w1s);
           _mm256_storeu_ps(w1 + 5, w1s);
           _mm256_storeu_ps(w1 + 10, w1s);
@@ -275,7 +270,6 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
             pi2 += n12 * 12;
             pi3 += n12 * 12;
             pi4 += n12 * 12;
-            ppa += n12 * 12;
 #if 0
             for (size_t i = 0; i < n4; ++i) {
               __m256 i0       = _mm256_loadu_ps(pi0 + i * 4);
