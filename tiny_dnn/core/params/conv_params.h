@@ -102,8 +102,8 @@ class Conv2dPadding {
       return;
     }
 
-    tensor_t buf(in.size());
-
+    out.resize(in.size());
+    tensor_t& buf = out;
     for_i(true, buf.size(), [&](int sample) {
       // alloc temporary buffer.
       buf[sample].resize(params_.in_padded.size());
@@ -121,9 +121,6 @@ class Conv2dPadding {
         }
       }
     });
-
-    // shrink buffer to output
-    out = buf;
   }
 
   /* Applies unpadding to an input tensor given the convolution parameters

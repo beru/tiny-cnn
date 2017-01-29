@@ -470,7 +470,14 @@ class layer : public node {
    */
   void forward() {
     // the computational graph
+#if 1
+    forward_in_data_.resize(in_channels_);
+    forward_out_data_.resize(out_channels_);
+    auto &in_data = forward_in_data_;
+    auto &out_data = forward_out_data_;
+#else
     std::vector<tensor_t *> in_data(in_channels_), out_data(out_channels_);
+#endif
 
     // Organize input/output vectors from storage (computational graph).
     // Internally ith_in_node() will create a connection/edge in the
@@ -498,8 +505,19 @@ class layer : public node {
   }
 
   void backward() {
+#if 1
+    backward_in_data_.resize(in_channels_);
+    backward_in_grad_.resize(in_channels_);
+    backward_out_data_.resize(out_channels_);
+    backward_out_grad_.resize(out_channels_);
+    auto &in_data = backward_in_data_;
+    auto &in_grad = backward_in_grad_;
+    auto &out_data = backward_out_data_;
+    auto &out_grad = backward_out_grad_;
+#else
     std::vector<tensor_t *> in_data(in_channels_), in_grad(in_channels_),
       out_data(out_channels_), out_grad(out_channels_);
+#endif
 
     // organize input/output vectors from storage
     for (serial_size_t i = 0; i < in_channels_; i++) {
@@ -690,10 +708,17 @@ class layer : public node {
   /** Pointer to the device on which the layer/node will run */
   Device *device_ptr_ = nullptr;
   /** Used in update_weight method. Kept as a member variable to reduce
-   * frequent
-   * memory allocation */
+      frequent memory allocation */
   vec_t weights_diff_;
 
+#if 1
+  std::vector<tensor_t *> forward_in_data_;
+  std::vector<tensor_t *> forward_out_data_;
+  std::vector<tensor_t *> backward_in_data_;
+  std::vector<tensor_t *> backward_in_grad_;
+  std::vector<tensor_t *> backward_out_data_;
+  std::vector<tensor_t *> backward_out_grad_;
+#endif
  private:
   /** Flag indicating whether the layer/node parameters are trainable */
   bool trainable_;
