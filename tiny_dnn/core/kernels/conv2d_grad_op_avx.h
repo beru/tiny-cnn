@@ -34,29 +34,23 @@ inline void accumulate_db(const index3d<serial_size_t> &out,
     }
   } else {
     auto area        = out.area();
-    size_t nblocks   = area / 8;
-    size_t remainder = area & 7;
-    // prepare load-mask beforehand
-    static const int32_t masks[] = {
-      -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0,
-    };
-    __m256i mask = _mm256_loadu_si256((const __m256i *)(masks + 8 - remainder));
+    size_t nblocks   = area / 4;
     for (size_t outc = 0; outc < out.depth_; ++outc) {
       serial_size_t idx = out.get_index(0, 0, static_cast<serial_size_t>(outc));
       const float *delta = &curr_delta[idx];
-      __m256 sum0        = _mm256_setzero_ps();
-      __m256 sum1        = _mm256_setzero_ps();
-      for (size_t i = 0; i < nblocks / 2; ++i) {
-        sum0 = _mm256_add_ps(sum0, _mm256_loadu_ps(delta + i * 16));
-        sum1 = _mm256_add_ps(sum1, _mm256_loadu_ps(delta + i * 16 + 8));
+      __m256d sum = _mm256_setzero_pd();
+      for (size_t i = 0; i < nblocks; ++i) {
+        __m256d tmp = _mm256_cvtps_pd(_mm_loadu_ps(delta + i * 4));
+        sum = _mm256_add_pd(sum, tmp);
       }
-      if (nblocks & 1) {
-        sum0 = _mm256_add_ps(sum0, _mm256_loadu_ps(delta + (nblocks - 1) * 8));
+      __m128d sum0 = hsum256_pd(sum);
+      __m128d sum1 = _mm_setzero_pd();
+      for (size_t i = nblocks * 4; i < area; ++i) {
+        sum1 = _mm_add_sd(sum1, _mm_cvtss_sd(_mm_setzero_pd(), _mm_load_ss(delta + i)));
       }
-      sum0 = _mm256_add_ps(sum0, sum1);
-      sum1 = _mm256_maskload_ps(delta + nblocks * 8, mask);
-      sum0 = _mm256_add_ps(sum0, sum1);
-      db[outc] += _mm_cvtss_f32(hsum256_ps(sum0));
+      sum0 = _mm_add_sd(sum0, sum1);
+      sum0 = _mm_add_sd(sum0, _mm_cvtss_sd(_mm_setzero_pd(), _mm_load_ss(&db[outc])));
+      _mm_store_ss(&db[outc], _mm_cvtsd_ss(_mm_setzero_ps(), sum0));
     }
   }
 }  // accumulate_db

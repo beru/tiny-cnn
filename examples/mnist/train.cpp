@@ -6,12 +6,13 @@
     in the LICENSE file.
 */
 #include <iostream>
+#include <cstring>
 #include "tiny_dnn/tiny_dnn.h"
 
 using namespace tiny_dnn;
 using namespace tiny_dnn::activation;
 
-static void construct_net(network<sequential>& nn) {
+static void construct_net(network<sequential>& nn, core::backend_t backend_type) {
 // connection table [Y.Lecun, 1998 Table.1]
 #define O true
 #define X false
@@ -27,10 +28,6 @@ static void construct_net(network<sequential>& nn) {
 // clang-format on
 #undef O
 #undef X
-
-  // by default will use backend_t::tiny_dnn unless you compiled
-  // with -DUSE_AVX=ON and your device supports AVX intrinsics
-  core::backend_t backend_type = core::default_engine();
 
   // construct nets
   //
@@ -51,16 +48,20 @@ static void construct_net(network<sequential>& nn) {
      << convolutional_layer<tan_h>(5, 5, 5, 16,
                                    120,  // C5, 16@5x5-in, 120@1x1-out
                                    padding::valid, true, 1, 1, backend_type)
+    //  << fully_connected_layer<softmax>(120, 10,  // F6, 120-in, 10-out
      << fully_connected_layer<tan_h>(120, 10,  // F6, 120-in, 10-out
                                      true, backend_type);
 }
 
-static void train_lenet(const std::string& data_dir_path) {
+static void train_lenet(const std::string& data_dir_path,
+                        int minibatch_size,
+                        int num_epochs,
+                        core::backend_t backend_type) {
   // specify loss-function and learning strategy
   network<sequential> nn;
   adagrad optimizer;
 
-  construct_net(nn);
+  construct_net(nn, backend_type);
 
   std::cout << "load models..." << std::endl;
 
@@ -76,11 +77,12 @@ static void train_lenet(const std::string& data_dir_path) {
                      -1.0, 1.0, 2, 2);
 
   std::cout << "start training" << std::endl;
+  std::cout << "minibatch_size\t: " << minibatch_size << std::endl;
+  std::cout << "num_epochs\t: " << num_epochs << std::endl;
+  std::cout << "backend\t: " << backend_type << std::endl;
 
   progress_display disp(static_cast<unsigned long>(train_images.size()));
   timer t;
-  int minibatch_size = 16;
-  int num_epochs     = 30;
 
   optimizer.alpha *=
     std::min(tiny_dnn::float_t(4),
@@ -111,12 +113,33 @@ static void train_lenet(const std::string& data_dir_path) {
   nn.save("LeNet-model");
 }
 
+static core::backend_t parse_backend_name(const char *name) {
+  static const char *names[] = {
+    "internal",
+    "nnpack",
+    "libdnn",
+    "avx",
+    "opencl",
+  };
+  for (size_t i=0; i<sizeof(names)/sizeof(names[0]); ++i) {
+    if (strcasecmp(name, names[i]) == 0) {
+      return (core::backend_t)i;
+    }
+  }
+  return core::default_engine();
+}
+
 int main(int argc, char** argv) {
-  if (argc != 2) {
+  if (argc < 2) {
     std::cerr << "Usage : " << argv[0] << " path_to_data (example:../data)"
               << std::endl;
     return -1;
   }
-  train_lenet(argv[1]);
+  const char *dir = argv[1];
+  int minibatch_size = (argc < 3) ? 16 : atoi(argv[2]);
+  int num_epochs = (argc < 4) ? 30 : atoi(argv[3]);
+  core::backend_t backend_type = (argc < 5) ? core::default_engine() : parse_backend_name(argv[4]);
+  train_lenet(dir, minibatch_size, num_epochs, backend_type);
   return 0;
 }
+
