@@ -120,7 +120,7 @@ class cross_entropy {
     vec_t d(t.size());
 
     for (serial_size_t i = 0; i < y.size(); ++i)
-      d[i]               = (y[i] - t[i]) / (y[i] * (float_t(1) - y[i]));
+      d[i] = (y[i] - t[i]) / (std::numeric_limits<float_t>::epsilon() + y[i] * (float_t(1) - y[i]));
 
     return d;
   }

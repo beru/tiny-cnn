@@ -36,6 +36,31 @@ using namespace tiny_dnn::activation;
 
 template <typename N>
 void construct_net(N &nn, core::backend_t backend_type) {
+
+#if 1
+  typedef convolutional_layer<elu> conv;
+  typedef max_pooling_layer<identity> pool;
+  typedef batch_normalization_layer bn;
+
+  nn
+     << conv(32, 32, 5, 3, 16, padding::same, true, 1, 1, backend_type)
+     << conv(32, 32, 5, 16, 16, padding::same, true, 1, 1, backend_type)
+     << pool(32, 32, 16, 2, backend_type)
+     << conv(16, 16, 5, 16, 16, padding::same, true, 1, 1, backend_type)
+     << conv(16, 16, 5, 16, 16, padding::same, true, 1, 1, backend_type)
+     //<< bn(16*16, 16)
+     << pool(16, 16, 16, 2, backend_type)
+     << conv(8, 8, 5, 16, 32, padding::same, true, 1, 1, backend_type)
+     << conv(8, 8, 5, 32, 32, padding::same, true, 1, 1, backend_type)
+     << pool(8, 8, 32, 2, backend_type)
+     << conv(4, 4, 5, 32, 64, padding::same, true, 1, 1, backend_type)
+     << conv(4, 4, 5, 64, 64, padding::same, true, 1, 1, backend_type)
+     << pool(4, 4, 64, 2, backend_type)
+     << conv(2, 2, 5, 64, 128, padding::same, true, 1, 1, backend_type)
+     << conv(2, 2, 5, 128, 128, padding::same, true, 1, 1, backend_type)
+     << pool(2, 2, 128, 2, backend_type)
+     << fully_connected_layer<softmax>(128, 10, true, backend_type);
+#else
   typedef convolutional_layer<activation::identity> conv;
   typedef max_pooling_layer<relu> pool;
 
@@ -56,6 +81,7 @@ void construct_net(N &nn, core::backend_t backend_type) {
      << fully_connected_layer<activation::identity>(4 * 4 * n_fmaps2, n_fc,
                                                     true, backend_type)
      << fully_connected_layer<softmax>(n_fc, 10, true, backend_type);
+#endif
 }
 
 void train_cifar10(std::string data_dir_path,
