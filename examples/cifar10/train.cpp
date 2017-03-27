@@ -38,28 +38,29 @@ template <typename N>
 void construct_net(N &nn, core::backend_t backend_type) {
 
 #if 1
-  typedef convolutional_layer<elu> conv;
-  typedef max_pooling_layer<identity> pool;
-  typedef batch_normalization_layer bn;
-
   nn
-     << conv(32, 32, 5, 3, 16, padding::same, true, 1, 1, backend_type)
-     << conv(32, 32, 5, 16, 16, padding::same, true, 1, 1, backend_type)
-     << pool(32, 32, 16, 2, backend_type)
-     << conv(16, 16, 5, 16, 16, padding::same, true, 1, 1, backend_type)
-     << conv(16, 16, 5, 16, 16, padding::same, true, 1, 1, backend_type)
-     //<< bn(16*16, 16)
-     << pool(16, 16, 16, 2, backend_type)
-     << conv(8, 8, 5, 16, 32, padding::same, true, 1, 1, backend_type)
-     << conv(8, 8, 5, 32, 32, padding::same, true, 1, 1, backend_type)
-     << pool(8, 8, 32, 2, backend_type)
-     << conv(4, 4, 5, 32, 64, padding::same, true, 1, 1, backend_type)
-     << conv(4, 4, 5, 64, 64, padding::same, true, 1, 1, backend_type)
-     << pool(4, 4, 64, 2, backend_type)
-     << conv(2, 2, 5, 64, 128, padding::same, true, 1, 1, backend_type)
-     << conv(2, 2, 5, 128, 128, padding::same, true, 1, 1, backend_type)
-     << pool(2, 2, 128, 2, backend_type)
-     << fully_connected_layer<softmax>(128, 10, true, backend_type);
+     << convolutional_layer<elu>(32, 32, 5, 3, 32, padding::same, true, 1, 1, backend_type)
+     << convolutional_layer<elu>(32, 32, 5, 32, 32, padding::same, true, 1, 1, backend_type)
+     << max_pooling_layer<identity>(32, 32, 32, 2, backend_type)
+     << convolutional_layer<elu>(16, 16, 5, 32, 64, padding::same, true, 1, 1, backend_type)
+     << convolutional_layer<elu>(16, 16, 5, 64, 64, padding::same, true, 1, 1, backend_type)
+    //  << convolutional_layer<elu>(16, 16, 5, 64, 64, padding::same, true, 1, 1, backend_type)
+    //  << convolutional_layer<elu>(16, 16, 5, 64, 64, padding::same, true, 1, 1, backend_type)
+     << max_pooling_layer<identity>(16, 16, 64, 2, backend_type)
+     << convolutional_layer<elu>(8, 8, 5, 64, 64, padding::same, true, 1, 1, backend_type)
+     << convolutional_layer<elu>(8, 8, 5, 64, 64, padding::same, true, 1, 1, backend_type)
+    //  << convolutional_layer<elu>(8, 8, 5, 64, 64, padding::same, true, 1, 1, backend_type)
+    //  << convolutional_layer<elu>(8, 8, 5, 64, 64, padding::same, true, 1, 1, backend_type)
+     << max_pooling_layer<identity>(8, 8, 64, 2, backend_type)
+    //  << dropout_layer(4*4*64, 0.5)
+     << fully_connected_layer<elu>(4*4*64, 4*64, true, backend_type)
+     << fully_connected_layer<elu>(4*64, 64, true, backend_type)
+    //  << dropout_layer(64, 0.2)
+     << fully_connected_layer<softmax>(64, 10, true, backend_type)
+    //  << fully_connected_layer<identity>(1000, 10, true, backend_type)
+    ;
+  nn.weight_init(weight_init::he());
+  
 #else
   typedef convolutional_layer<activation::identity> conv;
   typedef max_pooling_layer<relu> pool;
@@ -129,6 +130,9 @@ void train_cifar10(std::string data_dir_path,
 
     disp.restart(train_images.size());
     t.restart();
+    if (epoch % 10 == 9) {
+      optimizer.alpha *= 0.1;
+    }
   };
 
   auto on_enumerate_minibatch = [&]() { disp += n_minibatch; };
