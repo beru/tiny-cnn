@@ -332,6 +332,9 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion)
 
+set(CMAKE_CXX_FLAGS         "${CMAKE_CXX_FLAGS} -masm=intel")
+
+
 set(CMAKE_CXX_FLAGS         "${CMAKE_CXX_FLAGS} ${EXTRA_C_FLAGS}")
 # Create *-targets.cmake file for build directory
 install(TARGETS ${project_library_target_name}
