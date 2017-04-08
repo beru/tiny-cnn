@@ -194,11 +194,11 @@ inline void accumulate_dw(const core::conv_params &params,
               sum2      = madd256_ps(a2, b, sum2);
               sum3      = madd256_ps(a3, b, sum3);
               sum4      = madd256_ps(a4, b, sum4);
-              a0        = _mm256_maskload_ps(pa + 010, mask);
-              a1        = _mm256_maskload_ps(pa + 011, mask);
-              a2        = _mm256_maskload_ps(pa + 012, mask);
-              a3        = _mm256_maskload_ps(pa + 013, mask);
-              a4        = _mm256_maskload_ps(pa + 014, mask);
+              a0        = _mm256_loadu_ps(pa + 010);
+              a1        = _mm256_loadu_ps(pa + 011);
+              a2        = _mm256_loadu_ps(pa + 012);
+              a3        = _mm256_loadu_ps(pa + 013);
+              a4        = _mm256_load_ps(pa + 014);
               b         = _mm256_maskload_ps(pb + 010, mask);
               sum0      = madd256_ps(a0, b, sum0);
               sum1      = madd256_ps(a1, b, sum1);
@@ -271,11 +271,11 @@ inline void accumulate_dw(const core::conv_params &params,
                 sum3 = madd256_ps(a3, b, sum3);
                 sum4 = madd256_ps(a4, b, sum4);
               }
-              a0   = _mm256_maskload_ps(pa + 8 * nblocks + 0, mask);
-              a1   = _mm256_maskload_ps(pa + 8 * nblocks + 1, mask);
-              a2   = _mm256_maskload_ps(pa + 8 * nblocks + 2, mask);
-              a3   = _mm256_maskload_ps(pa + 8 * nblocks + 3, mask);
-              a4   = _mm256_maskload_ps(pa + 8 * nblocks + 4, mask);
+              a0   = _mm256_loadu_ps(pa + 8 * nblocks + 0);
+              a1   = _mm256_loadu_ps(pa + 8 * nblocks + 1);
+              a2   = _mm256_loadu_ps(pa + 8 * nblocks + 2);
+              a3   = _mm256_loadu_ps(pa + 8 * nblocks + 3);
+              a4   = _mm256_loadu_ps(pa + 8 * nblocks + 4);
               b    = _mm256_maskload_ps(pb + 8 * nblocks, mask);
               sum0 = madd256_ps(a0, b, sum0);
               sum1 = madd256_ps(a1, b, sum1);
@@ -312,11 +312,11 @@ inline void accumulate_dw(const core::conv_params &params,
             sum0 = sum1 = sum2 = sum3 = sum4 = _mm256_setzero_ps();
             for (size_t y = 0; y < out_height; ++y) {
               // vectorize::dot
-              __m256 a0 = _mm256_maskload_ps(pa + 0, mask);
-              __m256 a1 = _mm256_maskload_ps(pa + 1, mask);
-              __m256 a2 = _mm256_maskload_ps(pa + 2, mask);
-              __m256 a3 = _mm256_maskload_ps(pa + 3, mask);
-              __m256 a4 = _mm256_maskload_ps(pa + 4, mask);
+              __m256 a0 = _mm256_loadu_ps(pa + 0);
+              __m256 a1 = _mm256_loadu_ps(pa + 1);
+              __m256 a2 = _mm256_loadu_ps(pa + 2);
+              __m256 a3 = _mm256_loadu_ps(pa + 3);
+              __m256 a4 = _mm256_loadu_ps(pa + 4);
               __m256 b  = _mm256_maskload_ps(pb, mask);
               sum0      = madd256_ps(a0, b, sum0);
               sum1      = madd256_ps(a1, b, sum1);
@@ -475,6 +475,7 @@ void avx_conv2d_5x5_back_kernel_one(
   const size_t out_height = out.height_;
   // propagate delta to previous layer
   if (w_stride == 1 && out_width >= 4) {
+    __m256i widx = _mm256_setr_epi32(7,0,1,2,3,4,5,6);
     const size_t nblocks = out_width / 4;
     if (out_width % 4) {
       for (serial_size_t inc = 0; inc < in.depth_;
@@ -491,21 +492,12 @@ void avx_conv2d_5x5_back_kernel_one(
           __m256 w2a = _mm256_and_ps(_mm256_loadu_ps(pw + 10), mask);
           __m256 w3a = _mm256_and_ps(_mm256_loadu_ps(pw + 15), mask);
           __m256 w4a = _mm256_maskload_ps(pw + 20, imask);
-          __m256 w0b = leftShift<4>(w0a);
-          __m256 w1b = leftShift<4>(w1a);
-          __m256 w2b = leftShift<4>(w2a);
-          __m256 w3b = leftShift<4>(w3a);
-          __m256 w4b = leftShift<4>(w4a);
           __m256 w0c = leftShift<8>(w0a);
           __m256 w1c = leftShift<8>(w1a);
           __m256 w2c = leftShift<8>(w2a);
           __m256 w3c = leftShift<8>(w3a);
           __m256 w4c = leftShift<8>(w4a);
-          __m256 w0d = leftShift<12>(w0a);
-          __m256 w1d = leftShift<12>(w1a);
-          __m256 w2d = leftShift<12>(w2a);
-          __m256 w3d = leftShift<12>(w3a);
-          __m256 w4d = leftShift<12>(w4a);
+          __m256 w0,w1,w2,w3,w4;
           for (serial_size_t y = 0; y < out_height;
                ++y, pdelta_src += out_width, pdelta_dst += h_stride2) {
             float *delta_dst0 = pdelta_dst;
@@ -514,13 +506,18 @@ void avx_conv2d_5x5_back_kernel_one(
             float *delta_dst3 = &pdelta_dst[in_padded.width_ * 3];
             float *delta_dst4 = &pdelta_dst[in_padded.width_ * 4];
             for (serial_size_t n = 0; n < nblocks; ++n) {
-              __m256 delta_src =
-                _mm256_broadcast_ps((const __m128 *)(pdelta_src + n * 4));
+              w0         = _mm256_permutevar8x32_ps(w0a, widx);
+              w1         = _mm256_permutevar8x32_ps(w1a, widx);
+              w2         = _mm256_permutevar8x32_ps(w2a, widx);
+              w3         = _mm256_permutevar8x32_ps(w3a, widx);
+              w4         = _mm256_permutevar8x32_ps(w4a, widx);
               __m256 dst0 = _mm256_loadu_ps(delta_dst0 + 4 * n);
               __m256 dst1 = _mm256_loadu_ps(delta_dst1 + 4 * n);
               __m256 dst2 = _mm256_loadu_ps(delta_dst2 + 4 * n);
               __m256 dst3 = _mm256_loadu_ps(delta_dst3 + 4 * n);
               __m256 dst4 = _mm256_loadu_ps(delta_dst4 + 4 * n);
+              __m256 delta_src =
+                _mm256_broadcast_ps((const __m128 *)(pdelta_src + n * 4));
               __m256 delta_src0 =
                 _mm256_permute_ps(delta_src, _MM_SHUFFLE(0, 0, 0, 0));
               __m256 delta_src1 =
@@ -534,25 +531,33 @@ void avx_conv2d_5x5_back_kernel_one(
               dst2 = madd256_ps(w2a, delta_src0, dst2);
               dst3 = madd256_ps(w3a, delta_src0, dst3);
               dst4 = madd256_ps(w4a, delta_src0, dst4);
-              dst0 = madd256_ps(w0b, delta_src1, dst0);
-              dst1 = madd256_ps(w1b, delta_src1, dst1);
-              dst2 = madd256_ps(w2b, delta_src1, dst2);
-              dst3 = madd256_ps(w3b, delta_src1, dst3);
-              dst4 = madd256_ps(w4b, delta_src1, dst4);
+              dst0 = madd256_ps(w0, delta_src1, dst0);
+              dst1 = madd256_ps(w1, delta_src1, dst1);
+              dst2 = madd256_ps(w2, delta_src1, dst2);
+              dst3 = madd256_ps(w3, delta_src1, dst3);
+              dst4 = madd256_ps(w4, delta_src1, dst4);
+
+              w0   = _mm256_permutevar8x32_ps(w0c, widx);
+              w1   = _mm256_permutevar8x32_ps(w1c, widx);
+              w2   = _mm256_permutevar8x32_ps(w2c, widx);
+              w3   = _mm256_permutevar8x32_ps(w3c, widx);
+              w4   = _mm256_permutevar8x32_ps(w4c, widx);
+
               dst0 = madd256_ps(w0c, delta_src2, dst0);
               dst1 = madd256_ps(w1c, delta_src2, dst1);
               dst2 = madd256_ps(w2c, delta_src2, dst2);
               dst3 = madd256_ps(w3c, delta_src2, dst3);
               dst4 = madd256_ps(w4c, delta_src2, dst4);
-              dst0 = madd256_ps(w0d, delta_src3, dst0);
+              dst0 = madd256_ps(w0, delta_src3, dst0);
+              dst1 = madd256_ps(w1, delta_src3, dst1);
+              dst2 = madd256_ps(w2, delta_src3, dst2);
+              dst3 = madd256_ps(w3, delta_src3, dst3);
+              dst4 = madd256_ps(w4, delta_src3, dst4);
+              
               _mm256_storeu_ps(delta_dst0 + 4 * n, dst0);
-              dst1 = madd256_ps(w1d, delta_src3, dst1);
               _mm256_storeu_ps(delta_dst1 + 4 * n, dst1);
-              dst2 = madd256_ps(w2d, delta_src3, dst2);
               _mm256_storeu_ps(delta_dst2 + 4 * n, dst2);
-              dst3 = madd256_ps(w3d, delta_src3, dst3);
               _mm256_storeu_ps(delta_dst3 + 4 * n, dst3);
-              dst4 = madd256_ps(w4d, delta_src3, dst4);
               _mm256_storeu_ps(delta_dst4 + 4 * n, dst4);
             }  // for nblocks
             for (size_t x = nblocks * 4; x < out_width; ++x) {
@@ -567,10 +572,10 @@ void avx_conv2d_5x5_back_kernel_one(
               dst2             = madd256_ps(w2a, delta_src, dst2);
               dst3             = madd256_ps(w3a, delta_src, dst3);
               dst4             = madd256_ps(w4a, delta_src, dst4);
-              _mm256_maskstore_ps(delta_dst0 + x, imask, dst0);
-              _mm256_maskstore_ps(delta_dst1 + x, imask, dst1);
-              _mm256_maskstore_ps(delta_dst2 + x, imask, dst2);
-              _mm256_maskstore_ps(delta_dst3 + x, imask, dst3);
+              _mm256_storeu_ps(delta_dst0 + x, dst0);
+              _mm256_storeu_ps(delta_dst1 + x, dst1);
+              _mm256_storeu_ps(delta_dst2 + x, dst2);
+              _mm256_storeu_ps(delta_dst3 + x, dst3);
               _mm256_maskstore_ps(delta_dst4 + x, imask, dst4);
             }  // for x
           }    // for out_height
@@ -591,21 +596,12 @@ void avx_conv2d_5x5_back_kernel_one(
           __m256 w2a      = _mm256_and_ps(_mm256_loadu_ps(pw + 10), mask);
           __m256 w3a      = _mm256_and_ps(_mm256_loadu_ps(pw + 15), mask);
           __m256 w4a      = _mm256_maskload_ps(pw + 20, imask);
-          __m256 w0b      = leftShift<4>(w0a);
-          __m256 w1b      = leftShift<4>(w1a);
-          __m256 w2b      = leftShift<4>(w2a);
-          __m256 w3b      = leftShift<4>(w3a);
-          __m256 w4b      = leftShift<4>(w4a);
-          __m256 w0c      = leftShift<8>(w0a);
-          __m256 w1c      = leftShift<8>(w1a);
-          __m256 w2c      = leftShift<8>(w2a);
-          __m256 w3c      = leftShift<8>(w3a);
-          __m256 w4c      = leftShift<8>(w4a);
-          __m256 w0d      = leftShift<12>(w0a);
-          __m256 w1d      = leftShift<12>(w1a);
-          __m256 w2d      = leftShift<12>(w2a);
-          __m256 w3d      = leftShift<12>(w3a);
-          __m256 w4d      = leftShift<12>(w4a);
+          __m256 w0c = leftShift<8>(w0a);
+          __m256 w1c = leftShift<8>(w1a);
+          __m256 w2c = leftShift<8>(w2a);
+          __m256 w3c = leftShift<8>(w3a);
+          __m256 w4c = leftShift<8>(w4a);
+          __m256 w0,w1,w2,w3,w4;
           serial_size_t y = 0;
           do {
             float *delta_dst0 = pdelta_dst;
@@ -617,6 +613,11 @@ void avx_conv2d_5x5_back_kernel_one(
             do {
               __m256 delta_src =
                 _mm256_broadcast_ps((const __m128 *)(pdelta_src + n * 4));
+              w0         = _mm256_permutevar8x32_ps(w0a, widx);
+              w1         = _mm256_permutevar8x32_ps(w1a, widx);
+              w2         = _mm256_permutevar8x32_ps(w2a, widx);
+              w3         = _mm256_permutevar8x32_ps(w3a, widx);
+              w4         = _mm256_permutevar8x32_ps(w4a, widx);
               __m256 dst0 = _mm256_loadu_ps(delta_dst0 + 4 * n);
               __m256 dst1 = _mm256_loadu_ps(delta_dst1 + 4 * n);
               __m256 dst2 = _mm256_loadu_ps(delta_dst2 + 4 * n);
@@ -635,25 +636,31 @@ void avx_conv2d_5x5_back_kernel_one(
               dst2 = madd256_ps(w2a, delta_src0, dst2);
               dst3 = madd256_ps(w3a, delta_src0, dst3);
               dst4 = madd256_ps(w4a, delta_src0, dst4);
-              dst0 = madd256_ps(w0b, delta_src1, dst0);
-              dst1 = madd256_ps(w1b, delta_src1, dst1);
-              dst2 = madd256_ps(w2b, delta_src1, dst2);
-              dst3 = madd256_ps(w3b, delta_src1, dst3);
-              dst4 = madd256_ps(w4b, delta_src1, dst4);
+              dst0 = madd256_ps(w0, delta_src1, dst0);
+              dst1 = madd256_ps(w1, delta_src1, dst1);
+              dst2 = madd256_ps(w2, delta_src1, dst2);
+              dst3 = madd256_ps(w3, delta_src1, dst3);
+              dst4 = madd256_ps(w4, delta_src1, dst4);
+
+              w0   = _mm256_permutevar8x32_ps(w0c, widx);
+              w1   = _mm256_permutevar8x32_ps(w1c, widx);
+              w2   = _mm256_permutevar8x32_ps(w2c, widx);
+              w3   = _mm256_permutevar8x32_ps(w3c, widx);
+              w4   = _mm256_permutevar8x32_ps(w4c, widx);              
               dst0 = madd256_ps(w0c, delta_src2, dst0);
               dst1 = madd256_ps(w1c, delta_src2, dst1);
               dst2 = madd256_ps(w2c, delta_src2, dst2);
               dst3 = madd256_ps(w3c, delta_src2, dst3);
               dst4 = madd256_ps(w4c, delta_src2, dst4);
-              dst0 = madd256_ps(w0d, delta_src3, dst0);
+              dst0 = madd256_ps(w0, delta_src3, dst0);
+              dst1 = madd256_ps(w1, delta_src3, dst1);
+              dst2 = madd256_ps(w2, delta_src3, dst2);
+              dst3 = madd256_ps(w3, delta_src3, dst3);
+              dst4 = madd256_ps(w4, delta_src3, dst4);
               _mm256_storeu_ps(delta_dst0 + 4 * n, dst0);
-              dst1 = madd256_ps(w1d, delta_src3, dst1);
               _mm256_storeu_ps(delta_dst1 + 4 * n, dst1);
-              dst2 = madd256_ps(w2d, delta_src3, dst2);
               _mm256_storeu_ps(delta_dst2 + 4 * n, dst2);
-              dst3 = madd256_ps(w3d, delta_src3, dst3);
               _mm256_storeu_ps(delta_dst3 + 4 * n, dst3);
-              dst4 = madd256_ps(w4d, delta_src3, dst4);
               _mm256_storeu_ps(delta_dst4 + 4 * n, dst4);
               ++n;
             } while (n < nblocks);
@@ -755,10 +762,10 @@ void avx_conv2d_5x5_back_kernel_one(
       dst3 = _mm256_add_ps(dst3, new_sum3);
       dst4 = _mm256_add_ps(dst4, new_sum4);
 
-      _mm256_maskstore_ps(delta_dst0, imask, dst0);
-      _mm256_maskstore_ps(delta_dst1, imask, dst1);
-      _mm256_maskstore_ps(delta_dst2, imask, dst2);
-      _mm256_maskstore_ps(delta_dst3, imask, dst3);
+      _mm256_store_ps(delta_dst0, dst0);
+      _mm256_store_ps(delta_dst1, dst1);
+      _mm256_store_ps(delta_dst2, dst2);
+      _mm256_store_ps(delta_dst3, dst3);
       _mm256_maskstore_ps(delta_dst4, imask, dst4);
     }  // for
   } else {
@@ -770,10 +777,10 @@ void avx_conv2d_5x5_back_kernel_one(
         const float *pw         = &W[25 * (in.depth_ * outc + inc)];
         const float *pdelta_src = &curr_delta[out.get_index(0, 0, outc)];
         float *pdelta_dst       = pdelta_dst_org;
-        __m256 w0a              = _mm256_maskload_ps(pw + 0, imask);
-        __m256 w1a              = _mm256_maskload_ps(pw + 5, imask);
-        __m256 w2a              = _mm256_maskload_ps(pw + 10, imask);
-        __m256 w3a              = _mm256_maskload_ps(pw + 15, imask);
+        __m256 w0a              = _mm256_and_ps(_mm256_loadu_ps(pw + 0), mask);
+        __m256 w1a              = _mm256_and_ps(_mm256_loadu_ps(pw + 5), mask);
+        __m256 w2a              = _mm256_and_ps(_mm256_loadu_ps(pw + 10), mask);
+        __m256 w3a              = _mm256_and_ps(_mm256_loadu_ps(pw + 15), mask);
         __m256 w4a              = _mm256_maskload_ps(pw + 20, imask);
         for (serial_size_t y = 0; y < out_height;
              ++y, pdelta_src += out_width, pdelta_dst += h_stride2) {
