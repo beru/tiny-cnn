@@ -84,6 +84,7 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
       _mm_store_ss(&a[o], _mm_add_ss(hsum, b));
     }
   } else {
+    __m256i widx = _mm256_setr_epi32(7,0,1,2,3,4,5,6);
     const serial_size_t nblocks = out.width_ / 4;
     for (serial_size_t o = 0; o < out.depth_; ++o, oidx += out_area) {
       float *pa = &a[oidx];
@@ -120,7 +121,11 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
         __m256 w2a = _mm256_maskload_ps(pw + 10, imask);
         __m256 w3a = _mm256_maskload_ps(pw + 15, imask);
         __m256 w4a = _mm256_maskload_ps(pw + 20, imask);
-        __m256i widx = _mm256_setr_epi32(7,0,1,2,3,4,5,6);
+        __m256 w0c = leftShift<8>(w0a);
+        __m256 w1c = leftShift<8>(w1a);
+        __m256 w2c = leftShift<8>(w2a);
+        __m256 w3c = leftShift<8>(w3a);
+        __m256 w4c = leftShift<8>(w4a);
         __m256 w0,w1,w2,w3,w4;
         float *ppa = pa;
         if (w_stride == 1) {
@@ -132,55 +137,47 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
               const float *pi3 = pi0 + 3 * in_padded.width_;
               const float *pi4 = pi0 + 4 * in_padded.width_;
               __m256 dst0, dst1, dst2, dst3;
-              __m256 i0       = _mm256_loadu_ps(pi0);
-              __m256 i1       = _mm256_loadu_ps(pi1);
-              __m256 i2       = _mm256_loadu_ps(pi2);
-              __m256 i3       = _mm256_loadu_ps(pi3);
-              __m256 i4       = _mm256_loadu_ps(pi4);
+              __m256 i0  = _mm256_loadu_ps(pi0);
+              __m256 i1  = _mm256_loadu_ps(pi1);
+              __m256 i2  = _mm256_loadu_ps(pi2);
+              __m256 i3  = _mm256_loadu_ps(pi3);
+              __m256 i4  = _mm256_loadu_ps(pi4);
 
-              dst0            = _mm256_mul_ps(w0a, i0);
-              w0              = _mm256_permutevar8x32_ps(w0a, widx);
-              dst0            = madd256_ps(w1a, i1, dst0);
-              w1              = _mm256_permutevar8x32_ps(w1a, widx);
-              dst0            = madd256_ps(w2a, i2, dst0);
-              w2              = _mm256_permutevar8x32_ps(w2a, widx);
-              dst0            = madd256_ps(w3a, i3, dst0);
-              w3              = _mm256_permutevar8x32_ps(w3a, widx);
-              dst0            = madd256_ps(w4a, i4, dst0);
-              w4              = _mm256_permutevar8x32_ps(w4a, widx);
+              w0         = _mm256_permutevar8x32_ps(w0a, widx);
+              w1         = _mm256_permutevar8x32_ps(w1a, widx);
+              w2         = _mm256_permutevar8x32_ps(w2a, widx);
+              w3         = _mm256_permutevar8x32_ps(w3a, widx);
+              w4         = _mm256_permutevar8x32_ps(w4a, widx);
 
-              dst1            = _mm256_mul_ps(w0, i0);
-              w0              = _mm256_permutevar8x32_ps(w0, widx);
-              dst1            = madd256_ps(w1, i1, dst1);
-              w1              = _mm256_permutevar8x32_ps(w1, widx);
-              dst1            = madd256_ps(w2, i2, dst1);
-              w2              = _mm256_permutevar8x32_ps(w2, widx);
-              dst1            = madd256_ps(w3, i3, dst1);
-              w3              = _mm256_permutevar8x32_ps(w3, widx);
-              dst1            = madd256_ps(w4, i4, dst1);
-              w4              = _mm256_permutevar8x32_ps(w4, widx);
+              dst0       = _mm256_mul_ps(w0a, i0);
+              dst0       = madd256_ps(w1a, i1, dst0);
+              dst0       = madd256_ps(w2a, i2, dst0);
+              dst0       = madd256_ps(w3a, i3, dst0);
+              dst0       = madd256_ps(w4a, i4, dst0);
 
-              dst2            = _mm256_mul_ps(w0, i0);
-              w0              = _mm256_permutevar8x32_ps(w0, widx);
-              dst2            = madd256_ps(w1, i1, dst2);
-              w1              = _mm256_permutevar8x32_ps(w1, widx);
-              dst2            = madd256_ps(w2, i2, dst2);
-              w2              = _mm256_permutevar8x32_ps(w2, widx);
-              dst2            = madd256_ps(w3, i3, dst2);
-              w3              = _mm256_permutevar8x32_ps(w3, widx);
-              dst2            = madd256_ps(w4, i4, dst2);
-              w4              = _mm256_permutevar8x32_ps(w4, widx);
+              dst1       = _mm256_mul_ps(w0, i0);
+              dst1       = madd256_ps(w1, i1, dst1);
+              dst1       = madd256_ps(w2, i2, dst1);
+              dst1       = madd256_ps(w3, i3, dst1);
+              dst1       = madd256_ps(w4, i4, dst1);
 
-              dst3            = _mm256_mul_ps(w0, i0);
-              w0              = _mm256_permutevar8x32_ps(w0, widx);
-              dst3            = madd256_ps(w1, i1, dst3);
-              w1              = _mm256_permutevar8x32_ps(w1, widx);
-              dst3            = madd256_ps(w2, i2, dst3);
-              w2              = _mm256_permutevar8x32_ps(w2, widx);
-              dst3            = madd256_ps(w3, i3, dst3);
-              w3              = _mm256_permutevar8x32_ps(w3, widx);
-              dst3            = madd256_ps(w4, i4, dst3);
-              w4              = _mm256_permutevar8x32_ps(w4, widx);
+              w0         = _mm256_permutevar8x32_ps(w0c, widx);
+              w1         = _mm256_permutevar8x32_ps(w1c, widx);
+              w2         = _mm256_permutevar8x32_ps(w2c, widx);
+              w3         = _mm256_permutevar8x32_ps(w3c, widx);
+              w4         = _mm256_permutevar8x32_ps(w4c, widx);
+
+              dst2       = _mm256_mul_ps(w0c, i0);
+              dst2       = madd256_ps(w1c, i1, dst2);
+              dst2       = madd256_ps(w2c, i2, dst2);
+              dst2       = madd256_ps(w3c, i3, dst2);
+              dst2       = madd256_ps(w4c, i4, dst2);
+
+              dst3       = _mm256_mul_ps(w0, i0);
+              dst3       = madd256_ps(w1, i1, dst3);
+              dst3       = madd256_ps(w2, i2, dst3);
+              dst3       = madd256_ps(w3, i3, dst3);
+              dst3       = madd256_ps(w4, i4, dst3);
 
               __m128 sum      = _mm_loadu_ps(ppa);
               __m128 hsum0123 = hsum4x256_ps(dst0, dst1, dst2, dst3);
@@ -192,49 +189,43 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
                 i2       = _mm256_loadu_ps(pi2 + i * 4);
                 i3       = _mm256_loadu_ps(pi3 + i * 4);
                 i4       = _mm256_loadu_ps(pi4 + i * 4);
-                dst0            = _mm256_mul_ps(w0a, i0);
-                w0              = _mm256_permutevar8x32_ps(w0a, widx);
-                dst0            = madd256_ps(w1a, i1, dst0);
-                w1              = _mm256_permutevar8x32_ps(w1a, widx);
-                dst0            = madd256_ps(w2a, i2, dst0);
-                w2              = _mm256_permutevar8x32_ps(w2a, widx);
-                dst0            = madd256_ps(w3a, i3, dst0);
-                w3              = _mm256_permutevar8x32_ps(w3a, widx);
-                dst0            = madd256_ps(w4a, i4, dst0);
-                w4              = _mm256_permutevar8x32_ps(w4a, widx);
 
-                dst1            = _mm256_mul_ps(w0, i0);
-                w0              = _mm256_permutevar8x32_ps(w0, widx);
-                dst1            = madd256_ps(w1, i1, dst1);
-                w1              = _mm256_permutevar8x32_ps(w1, widx);
-                dst1            = madd256_ps(w2, i2, dst1);
-                w2              = _mm256_permutevar8x32_ps(w2, widx);
-                dst1            = madd256_ps(w3, i3, dst1);
-                w3              = _mm256_permutevar8x32_ps(w3, widx);
-                dst1            = madd256_ps(w4, i4, dst1);
-                w4              = _mm256_permutevar8x32_ps(w4, widx);
+                w0       = _mm256_permutevar8x32_ps(w0a, widx);
+                w1       = _mm256_permutevar8x32_ps(w1a, widx);
+                w2       = _mm256_permutevar8x32_ps(w2a, widx);
+                w3       = _mm256_permutevar8x32_ps(w3a, widx);
+                w4       = _mm256_permutevar8x32_ps(w4a, widx);
+  
+                dst0     = _mm256_mul_ps(w0a, i0);
+                dst0     = madd256_ps(w1a, i1, dst0);
+                dst0     = madd256_ps(w2a, i2, dst0);
+                dst0     = madd256_ps(w3a, i3, dst0);
+                dst0     = madd256_ps(w4a, i4, dst0);
+  
+                dst1     = _mm256_mul_ps(w0, i0);
+                dst1     = madd256_ps(w1, i1, dst1);
+                dst1     = madd256_ps(w2, i2, dst1);
+                dst1     = madd256_ps(w3, i3, dst1);
+                dst1     = madd256_ps(w4, i4, dst1);
+  
+                w0       = _mm256_permutevar8x32_ps(w0c, widx);
+                w1       = _mm256_permutevar8x32_ps(w1c, widx);
+                w2       = _mm256_permutevar8x32_ps(w2c, widx);
+                w3       = _mm256_permutevar8x32_ps(w3c, widx);
+                w4       = _mm256_permutevar8x32_ps(w4c, widx);
 
-                dst2            = _mm256_mul_ps(w0, i0);
-                w0              = _mm256_permutevar8x32_ps(w0, widx);
-                dst2            = madd256_ps(w1, i1, dst2);
-                w1              = _mm256_permutevar8x32_ps(w1, widx);
-                dst2            = madd256_ps(w2, i2, dst2);
-                w2              = _mm256_permutevar8x32_ps(w2, widx);
-                dst2            = madd256_ps(w3, i3, dst2);
-                w3              = _mm256_permutevar8x32_ps(w3, widx);
-                dst2            = madd256_ps(w4, i4, dst2);
-                w4              = _mm256_permutevar8x32_ps(w4, widx);
+                dst2     = _mm256_mul_ps(w0c, i0);
+                dst2     = madd256_ps(w1c, i1, dst2);
+                dst2     = madd256_ps(w2c, i2, dst2);
+                dst2     = madd256_ps(w3c, i3, dst2);
+                dst2     = madd256_ps(w4c, i4, dst2);
+  
+                dst3     = _mm256_mul_ps(w0, i0);
+                dst3     = madd256_ps(w1, i1, dst3);
+                dst3     = madd256_ps(w2, i2, dst3);
+                dst3     = madd256_ps(w3, i3, dst3);
+                dst3     = madd256_ps(w4, i4, dst3);
 
-                dst3            = _mm256_mul_ps(w0, i0);
-                w0              = _mm256_permutevar8x32_ps(w0, widx);
-                dst3            = madd256_ps(w1, i1, dst3);
-                w1              = _mm256_permutevar8x32_ps(w1, widx);
-                dst3            = madd256_ps(w2, i2, dst3);
-                w2              = _mm256_permutevar8x32_ps(w2, widx);
-                dst3            = madd256_ps(w3, i3, dst3);
-                w3              = _mm256_permutevar8x32_ps(w3, widx);
-                dst3            = madd256_ps(w4, i4, dst3);
-                w4              = _mm256_permutevar8x32_ps(w4, widx);
                 sum      = _mm_loadu_ps(ppa + i * 4);
                 hsum0123 = hsum4x256_ps(dst0, dst1, dst2, dst3);
                 sum      = _mm_add_ps(sum, hsum0123);
