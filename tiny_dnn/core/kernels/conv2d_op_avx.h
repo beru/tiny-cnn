@@ -82,7 +82,7 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
       _mm_store_ss(&a[o], _mm_add_ss(hsum, b));
     }
   } else {
-    const serial_size_t nblocks = out.width_ / 4;
+    const serial_size_t nblocks = out.width_ / 8;
     for (serial_size_t o = 0; o < out.depth_; ++o, oidx += out_area) {
       float *pa = &a[oidx];
       // init to bias value
@@ -113,17 +113,26 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
         const float *pw = (const float *)&W[25 * (params.in.depth_ * o + inc)];
         const float *pi = (const float *)&in[in_padded.get_index(0, 0, inc)];
 
-        __m256 w0 = _mm256_loadu_ps(pw + 0);
-        __m256 w1 = _mm256_loadu_ps(pw + 5);
-        __m256 w2 = _mm256_loadu_ps(pw + 10);
-        __m256 w3 = _mm256_loadu_ps(pw + 15);
-        __m256 w4 = _mm256_maskload_ps(pw + 20, imask);
-        __m256i widx = _mm256_setr_epi32(0,1,2,3,4,1,2,3);
-        w0 = _mm256_permutevar8x32_ps(w0, widx);
-        w1 = _mm256_permutevar8x32_ps(w1, widx);
-        w2 = _mm256_permutevar8x32_ps(w2, widx);
-        w3 = _mm256_permutevar8x32_ps(w3, widx);
-        w4 = _mm256_permutevar8x32_ps(w4, widx);
+        __m256 w0a = _mm256_maskload_ps(pw + 0, imask);
+        __m256 w1a = _mm256_maskload_ps(pw + 5, imask);
+        __m256 w2a = _mm256_maskload_ps(pw + 10, imask);
+        __m256 w3a = _mm256_maskload_ps(pw + 15, imask);
+        __m256 w4a = _mm256_maskload_ps(pw + 20, imask);
+        __m256 w0b = leftShift<4>(w0a);
+        __m256 w1b = leftShift<4>(w1a);
+        __m256 w2b = leftShift<4>(w2a);
+        __m256 w3b = leftShift<4>(w3a);
+        __m256 w4b = leftShift<4>(w4a);
+        __m256 w0c = leftShift<8>(w0a);
+        __m256 w1c = leftShift<8>(w1a);
+        __m256 w2c = leftShift<8>(w2a);
+        __m256 w3c = leftShift<8>(w3a);
+        __m256 w4c = leftShift<8>(w4a);
+        __m256 w0d = leftShift<12>(w0a);
+        __m256 w1d = leftShift<12>(w1a);
+        __m256 w2d = leftShift<12>(w2a);
+        __m256 w3d = leftShift<12>(w3a);
+        __m256 w4d = leftShift<12>(w4a);
         float *ppa = pa;
         if (w_stride == 1) {
           for (serial_size_t y = 0; y < out.height_; ++y, ppa += out.width_) {
@@ -132,78 +141,90 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
             const float *pi2 = pi0 + 2 * in_padded.width_;
             const float *pi3 = pi0 + 3 * in_padded.width_;
             const float *pi4 = pi0 + 4 * in_padded.width_;
-            __m256 dst0, dst1, dst2, dst3;
-            __m256 i0, i1, i2, i3, i4;
-            __m256 w5, w6, w7;
-            __m128 sum, hsum0123;
             for (size_t i = 0; i < nblocks; ++i) {
-              i0       = _mm256_loadu_ps(pi0 + i * 4);
-              i1       = _mm256_loadu_ps(pi1 + i * 4);
-              w5 = _mm256_permute_ps(w0, _MM_SHUFFLE(2, 1, 0, 3));
-              w6 = _mm256_permute_ps(w0, _MM_SHUFFLE(1, 0, 3, 2));
-              w7 = _mm256_permute_ps(w0, _MM_SHUFFLE(0, 3, 2, 1));
-              dst0     = _mm256_mul_ps(w0, i0);
-              dst1     = _mm256_mul_ps(w5, i0);
-              dst2     = _mm256_mul_ps(w6, i0);
-              dst3     = _mm256_mul_ps(w7, i0);
+              __m256 d0, d1, d2, d3, d4, d5, d6, d7;
+              __m256 i0, i1, i2, i3, i4, i5, i6, i7, i8, i9;
+              __m128 sum0, sum1, hsum0123;
+              i0       = _mm256_loadu_ps(pi0 + i * 8);
+              i1       = _mm256_loadu_ps(pi1 + i * 8);
+              i2       = _mm256_loadu_ps(pi2 + i * 8);
+              i3       = _mm256_loadu_ps(pi3 + i * 8);
+              i4       = _mm256_loadu_ps(pi4 + i * 8);
+              i5       = _mm256_loadu_ps(pi0 + 4 + i * 8);
+              i6       = _mm256_loadu_ps(pi1 + 4 + i * 8);
+              i7       = _mm256_loadu_ps(pi2 + 4 + i * 8);
+              i8       = _mm256_loadu_ps(pi3 + 4 + i * 8);
+              i9       = _mm256_loadu_ps(pi4 + 4 + i * 8);
+              
+              d0     = _mm256_mul_ps(w0a, i0);
+              d1     = _mm256_mul_ps(w0b, i0);
+              d2     = _mm256_mul_ps(w0c, i0);
+              d3     = _mm256_mul_ps(w0d, i0);
+              d4     = _mm256_mul_ps(w0a, i5);
+              d5     = _mm256_mul_ps(w0b, i5);
+              d6     = _mm256_mul_ps(w0c, i5);
+              d7     = _mm256_mul_ps(w0d, i5);
 
-              w5 = _mm256_permute_ps(w1, _MM_SHUFFLE(2, 1, 0, 3));
-              w6 = _mm256_permute_ps(w1, _MM_SHUFFLE(1, 0, 3, 2));
-              w7 = _mm256_permute_ps(w1, _MM_SHUFFLE(0, 3, 2, 1));
-              dst0     = madd256_ps(w1, i1, dst0);
-              dst1     = madd256_ps(w5, i1, dst1);
-              dst2     = madd256_ps(w6, i1, dst2);
-              dst3     = madd256_ps(w7, i1, dst2);
+              d0     = madd256_ps(w1a, i1, d0);
+              d1     = madd256_ps(w1b, i1, d1);
+              d2     = madd256_ps(w1c, i1, d2);
+              d3     = madd256_ps(w1d, i1, d3);
+              d4     = madd256_ps(w1a, i6, d4);
+              d5     = madd256_ps(w1b, i6, d5);
+              d6     = madd256_ps(w1c, i6, d6);
+              d7     = madd256_ps(w1d, i6, d7);
 
-              i2       = _mm256_loadu_ps(pi2 + i * 4);
-              i3       = _mm256_loadu_ps(pi3 + i * 4);
-              w5 = _mm256_permute_ps(w2, _MM_SHUFFLE(2, 1, 0, 3));
-              w6 = _mm256_permute_ps(w2, _MM_SHUFFLE(1, 0, 3, 2));
-              w7 = _mm256_permute_ps(w2, _MM_SHUFFLE(0, 3, 2, 1));
-              dst0     = madd256_ps(w2, i2, dst0);
-              dst1     = madd256_ps(w5, i2, dst1);
-              dst2     = madd256_ps(w6, i2, dst2);
-              dst3     = madd256_ps(w7, i2, dst2);
+              d0     = madd256_ps(w2a, i2, d0);
+              d1     = madd256_ps(w2b, i2, d1);
+              d2     = madd256_ps(w2c, i2, d2);
+              d3     = madd256_ps(w2d, i2, d3);
+              d4     = madd256_ps(w2a, i7, d4);
+              d5     = madd256_ps(w2b, i7, d5);
+              d6     = madd256_ps(w2c, i7, d6);
+              d7     = madd256_ps(w2d, i7, d7);
+              
+              d0     = madd256_ps(w3a, i3, d0);
+              d1     = madd256_ps(w3b, i3, d1);
+              d2     = madd256_ps(w3c, i3, d2);
+              d3     = madd256_ps(w3d, i3, d3);
+              d4     = madd256_ps(w3a, i8, d4);
+              d5     = madd256_ps(w3b, i8, d5);
+              d6     = madd256_ps(w3c, i8, d6);
+              d7     = madd256_ps(w3d, i8, d7);
+              
+              d0     = madd256_ps(w4a, i4, d0);
+              d1     = madd256_ps(w4b, i4, d1);
+              d2     = madd256_ps(w4c, i4, d2);
+              d3     = madd256_ps(w4d, i4, d3);
+              d4     = madd256_ps(w4a, i9, d4);
+              d5     = madd256_ps(w4b, i9, d5);
+              d6     = madd256_ps(w4c, i9, d6);
+              d7     = madd256_ps(w4d, i9, d7);
 
-              i4       = _mm256_loadu_ps(pi4 + i * 4);
-              sum      = _mm_loadu_ps(ppa + i * 4);
-              w5 = _mm256_permute_ps(w3, _MM_SHUFFLE(2, 1, 0, 3));
-              w6 = _mm256_permute_ps(w3, _MM_SHUFFLE(1, 0, 3, 2));
-              w7 = _mm256_permute_ps(w3, _MM_SHUFFLE(0, 3, 2, 1));
-              dst0     = madd256_ps(w3, i3, dst0);
-              dst1     = madd256_ps(w5, i3, dst1);
-              dst2     = madd256_ps(w6, i3, dst2);
-              dst3     = madd256_ps(w7, i3, dst2);
+              sum0      = _mm_loadu_ps(ppa + i * 8);
+              hsum0123 = hsum4x256_ps(d0, d1, d2, d3);
+              sum0     = _mm_add_ps(sum0, hsum0123);
+              _mm_storeu_ps(ppa + i * 8, sum0);
 
-              w5 = _mm256_permute_ps(w4, _MM_SHUFFLE(2, 1, 0, 3));
-              w6 = _mm256_permute_ps(w4, _MM_SHUFFLE(1, 0, 3, 2));
-              w7 = _mm256_permute_ps(w4, _MM_SHUFFLE(0, 3, 2, 1));
-              dst0     = madd256_ps(w4, i4, dst0);
-              dst1     = madd256_ps(w5, i4, dst1);
-              dst2     = madd256_ps(w6, i4, dst2);
-              dst3     = madd256_ps(w7, i4, dst2);
-
-              dst0     = _mm256_blend_ps(dst0, _mm256_setzero_ps(), 0b11100000);
-              dst1     = _mm256_blend_ps(dst1, _mm256_setzero_ps(), 0b11000001);
-              dst2     = _mm256_blend_ps(dst2, _mm256_setzero_ps(), 0b10000011);
-              dst3     = _mm256_blend_ps(dst3, _mm256_setzero_ps(), 0b00000111);
-
-              hsum0123 = hsum4x256_ps(dst0, dst1, dst2, dst3);
-              sum      = _mm_add_ps(sum, hsum0123);
-              _mm_storeu_ps(ppa + i * 4, sum);
+              sum1      = _mm_loadu_ps(ppa + i * 8 + 4);
+              hsum0123 = hsum4x256_ps(d4, d5, d6, d7);
+              sum1     = _mm_add_ps(sum1, hsum0123);
+              _mm_storeu_ps(ppa + i * 8 + 4, sum1);
             }
-            for (serial_size_t x = nblocks * 4; x < out.width_; ++x) {
+            for (serial_size_t x = nblocks * 8; x < out.width_; ++x) {
+              __m256 i0, i1, i2, i3, i4;
+              __m128 sum;
               sum         = _mm_load_ss(&ppa[x]);
               i0          = _mm256_loadu_ps(pi0 + x);
               i1          = _mm256_loadu_ps(pi1 + x);
               i2          = _mm256_loadu_ps(pi2 + x);
               i3          = _mm256_loadu_ps(pi3 + x);
               i4          = _mm256_loadu_ps(pi4 + x);
-              __m256 sum0 = _mm256_mul_ps(w0, i0);
-              __m256 sum1 = _mm256_mul_ps(w1, i1);
-              sum0        = madd256_ps(w2, i2, sum0);
-              sum1        = madd256_ps(w3, i3, sum1);
-              sum0        = madd256_ps(w4, i4, sum0);
+              __m256 sum0 = _mm256_mul_ps(w0a, i0);
+              __m256 sum1 = _mm256_mul_ps(w1a, i1);
+              sum0        = madd256_ps(w2a, i2, sum0);
+              sum1        = madd256_ps(w3a, i3, sum1);
+              sum0        = madd256_ps(w4a, i4, sum0);
               sum0        = _mm256_add_ps(sum0, sum1);
               _mm_store_ss(&ppa[x], _mm_add_ss(sum, hsum256_ps(sum0)));
             }     // x loop
@@ -222,11 +243,11 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
               __m256 i2   = _mm256_loadu_ps(pi2);
               __m256 i3   = _mm256_loadu_ps(pi3);
               __m256 i4   = _mm256_loadu_ps(pi4);
-              __m256 sum0 = _mm256_mul_ps(w0, i0);
-              __m256 sum1 = _mm256_mul_ps(w1, i1);
-              sum0        = madd256_ps(w2, i2, sum0);
-              sum1        = madd256_ps(w3, i3, sum1);
-              sum0        = madd256_ps(w4, i4, sum0);
+              __m256 sum0 = _mm256_mul_ps(w0a, i0);
+              __m256 sum1 = _mm256_mul_ps(w1a, i1);
+              sum0        = madd256_ps(w2a, i2, sum0);
+              sum1        = madd256_ps(w3a, i3, sum1);
+              sum0        = madd256_ps(w4a, i4, sum0);
               sum0        = _mm256_add_ps(sum0, sum1);
               _mm_store_ss(&ppa[x], _mm_add_ss(sum, hsum256_ps(sum0)));
               pi0 += w_stride;
