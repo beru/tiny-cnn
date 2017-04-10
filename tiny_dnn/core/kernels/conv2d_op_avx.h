@@ -82,7 +82,8 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
       _mm_store_ss(&a[o], _mm_add_ss(hsum, b));
     }
   } else {
-    const serial_size_t nblocks = out.width_ / 8;
+    const serial_size_t n8blocks = out.width_ / 8;
+    const serial_size_t n4blocks = (out.width_ / 8) / 4;
     for (serial_size_t o = 0; o < out.depth_; ++o, oidx += out_area) {
       float *pa = &a[oidx];
       // init to bias value
@@ -141,7 +142,7 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
             const float *pi2 = pi0 + 2 * in_padded.width_;
             const float *pi3 = pi0 + 3 * in_padded.width_;
             const float *pi4 = pi0 + 4 * in_padded.width_;
-            for (size_t i = 0; i < nblocks; ++i) {
+            for (size_t i = 0; i < n8blocks; ++i) {
               __m256 d0, d1, d2, d3, d4, d5, d6, d7;
               __m256 i0, i1, i2, i3, i4, i5, i6, i7, i8, i9;
               __m128 sum0, sum1, hsum0123;
@@ -211,7 +212,47 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
               sum1     = _mm_add_ps(sum1, hsum0123);
               _mm_storeu_ps(ppa + i * 8 + 4, sum1);
             }
-            for (serial_size_t x = nblocks * 8; x < out.width_; ++x) {
+            if (n4blocks) {
+              __m256 d0, d1, d2, d3;
+              __m256 i0, i1, i2, i3, i4;
+              __m128 sum0, hsum0123;
+              i0       = _mm256_loadu_ps(pi0 + n8blocks * 8);
+              i1       = _mm256_loadu_ps(pi1 + n8blocks * 8);
+              i2       = _mm256_loadu_ps(pi2 + n8blocks * 8);
+              i3       = _mm256_loadu_ps(pi3 + n8blocks * 8);
+              i4       = _mm256_loadu_ps(pi4 + n8blocks * 8);
+              
+              d0     = _mm256_mul_ps(w0a, i0);
+              d1     = _mm256_mul_ps(w0b, i0);
+              d2     = _mm256_mul_ps(w0c, i0);
+              d3     = _mm256_mul_ps(w0d, i0);
+
+              d0     = madd256_ps(w1a, i1, d0);
+              d1     = madd256_ps(w1b, i1, d1);
+              d2     = madd256_ps(w1c, i1, d2);
+              d3     = madd256_ps(w1d, i1, d3);
+
+              d0     = madd256_ps(w2a, i2, d0);
+              d1     = madd256_ps(w2b, i2, d1);
+              d2     = madd256_ps(w2c, i2, d2);
+              d3     = madd256_ps(w2d, i2, d3);
+              
+              d0     = madd256_ps(w3a, i3, d0);
+              d1     = madd256_ps(w3b, i3, d1);
+              d2     = madd256_ps(w3c, i3, d2);
+              d3     = madd256_ps(w3d, i3, d3);
+              
+              d0     = madd256_ps(w4a, i4, d0);
+              d1     = madd256_ps(w4b, i4, d1);
+              d2     = madd256_ps(w4c, i4, d2);
+              d3     = madd256_ps(w4d, i4, d3);
+
+              sum0      = _mm_loadu_ps(ppa + n8blocks * 8);
+              hsum0123 = hsum4x256_ps(d0, d1, d2, d3);
+              sum0     = _mm_add_ps(sum0, hsum0123);
+              _mm_storeu_ps(ppa + n8blocks * 8, sum0);
+            }
+            for (serial_size_t x = n8blocks * 8 + n4blocks * 4; x < out.width_; ++x) {
               __m256 i0, i1, i2, i3, i4;
               __m128 sum;
               sum         = _mm_load_ss(&ppa[x]);
