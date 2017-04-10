@@ -198,7 +198,7 @@ inline void accumulate_dw(const core::conv_params &params,
               a1        = _mm256_loadu_ps(pa + 011);
               a2        = _mm256_loadu_ps(pa + 012);
               a3        = _mm256_loadu_ps(pa + 013);
-              a4        = _mm256_load_ps(pa + 014);
+              a4        = _mm256_loadu_ps(pa + 014);
               b         = _mm256_maskload_ps(pb + 010, mask);
               sum0      = madd256_ps(a0, b, sum0);
               sum1      = madd256_ps(a1, b, sum1);
@@ -755,10 +755,10 @@ void avx_conv2d_5x5_back_kernel_one(
       dst3 = _mm256_add_ps(dst3, new_sum3);
       dst4 = _mm256_add_ps(dst4, new_sum4);
 
-      _mm256_store_ps(delta_dst0, dst0);
-      _mm256_store_ps(delta_dst1, dst1);
-      _mm256_store_ps(delta_dst2, dst2);
-      _mm256_store_ps(delta_dst3, dst3);
+      _mm256_storeu_ps(delta_dst0, dst0);
+      _mm256_storeu_ps(delta_dst1, dst1);
+      _mm256_storeu_ps(delta_dst2, dst2);
+      _mm256_storeu_ps(delta_dst3, dst3);
       _mm256_maskstore_ps(delta_dst4, imask, dst4);
     }  // for
   } else {

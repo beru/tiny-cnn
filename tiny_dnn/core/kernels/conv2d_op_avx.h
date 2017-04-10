@@ -150,11 +150,11 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
               i2       = _mm256_loadu_ps(pi2 + i * 8);
               i3       = _mm256_loadu_ps(pi3 + i * 8);
               i4       = _mm256_loadu_ps(pi4 + i * 8);
-              i5       = _mm256_loadu_ps(pi0 + 4 + i * 8);
-              i6       = _mm256_loadu_ps(pi1 + 4 + i * 8);
-              i7       = _mm256_loadu_ps(pi2 + 4 + i * 8);
-              i8       = _mm256_loadu_ps(pi3 + 4 + i * 8);
-              i9       = _mm256_loadu_ps(pi4 + 4 + i * 8);
+              i5       = _mm256_loadu_ps(pi0 + i * 8 + 4);
+              i6       = _mm256_loadu_ps(pi1 + i * 8 + 4);
+              i7       = _mm256_loadu_ps(pi2 + i * 8 + 4);
+              i8       = _mm256_loadu_ps(pi3 + i * 8 + 4);
+              i9       = _mm256_loadu_ps(pi4 + i * 8 + 4);
               
               d0     = _mm256_mul_ps(w0a, i0);
               d1     = _mm256_mul_ps(w0b, i0);
