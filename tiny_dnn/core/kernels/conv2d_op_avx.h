@@ -83,7 +83,7 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
     }
   } else {
     const serial_size_t n8blocks = out.width_ / 8;
-    const serial_size_t n4blocks = (out.width_ / 8) / 4;
+    const serial_size_t n4blocks = (out.width_ % 8) / 4;
     for (serial_size_t o = 0; o < out.depth_; ++o, oidx += out_area) {
       float *pa = &a[oidx];
       // init to bias value
