@@ -145,7 +145,7 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
             for (size_t i = 0; i < n8blocks; ++i) {
               __m256 d0, d1, d2, d3, d4, d5, d6, d7;
               __m256 i0, i1, i2, i3, i4, i5, i6, i7, i8, i9;
-              __m128 sum0, sum1, hsum0123;
+              __m256 sum, hsum;
               i0       = _mm256_loadu_ps(pi0 + i * 8);
               i1       = _mm256_loadu_ps(pi1 + i * 8);
               i2       = _mm256_loadu_ps(pi2 + i * 8);
@@ -193,6 +193,8 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
               d6     = madd256_ps(w3c, i8, d6);
               d7     = madd256_ps(w3d, i8, d7);
               
+              sum    = _mm256_loadu_ps(ppa + i * 8);
+
               d0     = madd256_ps(w4a, i4, d0);
               d1     = madd256_ps(w4b, i4, d1);
               d2     = madd256_ps(w4c, i4, d2);
@@ -202,15 +204,9 @@ void avx_conv2d_5x5_kernel(const core::conv_params &params,
               d6     = madd256_ps(w4c, i9, d6);
               d7     = madd256_ps(w4d, i9, d7);
 
-              sum0      = _mm_loadu_ps(ppa + i * 8);
-              hsum0123 = hsum4x256_ps(d0, d1, d2, d3);
-              sum0     = _mm_add_ps(sum0, hsum0123);
-              _mm_storeu_ps(ppa + i * 8, sum0);
-
-              sum1      = _mm_loadu_ps(ppa + i * 8 + 4);
-              hsum0123 = hsum4x256_ps(d4, d5, d6, d7);
-              sum1     = _mm_add_ps(sum1, hsum0123);
-              _mm_storeu_ps(ppa + i * 8 + 4, sum1);
+              hsum   = hsum8x256_ps(d0, d1, d2, d3, d4, d5, d6, d7);
+              sum    = _mm256_add_ps(sum, hsum);
+              _mm256_storeu_ps(ppa + i * 8, sum);
             }
             if (n4blocks) {
               __m256 d0, d1, d2, d3;

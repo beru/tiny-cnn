@@ -196,6 +196,190 @@ inline __m128 hsum4x256_ps(const __m256 &a,
   return ret;
 }
 
+#if 1
+
+inline void transpose8_ps(__m256 &row0,
+                          __m256 &row1,
+                          __m256 &row2,
+                          __m256 &row3,
+                          __m256 &row4,
+                          __m256 &row5,
+                          __m256 &row6,
+                          __m256 &row7) {
+    __m256 __t0, __t1, __t2, __t3, __t4, __t5, __t6, __t7;
+    __m256 __tt0, __tt1, __tt2, __tt3, __tt4, __tt5, __tt6, __tt7;
+    __t0 = _mm256_unpacklo_ps(row0, row1);
+    __t1 = _mm256_unpackhi_ps(row0, row1);
+    __t2 = _mm256_unpacklo_ps(row2, row3);
+    __t3 = _mm256_unpackhi_ps(row2, row3);
+    __t4 = _mm256_unpacklo_ps(row4, row5);
+    __t5 = _mm256_unpackhi_ps(row4, row5);
+    __t6 = _mm256_unpacklo_ps(row6, row7);
+    __t7 = _mm256_unpackhi_ps(row6, row7);
+    __tt0 = _mm256_shuffle_ps(__t0,__t2,_MM_SHUFFLE(1,0,1,0));
+    __tt1 = _mm256_shuffle_ps(__t0,__t2,_MM_SHUFFLE(3,2,3,2));
+    __tt2 = _mm256_shuffle_ps(__t1,__t3,_MM_SHUFFLE(1,0,1,0));
+    __tt3 = _mm256_shuffle_ps(__t1,__t3,_MM_SHUFFLE(3,2,3,2));
+    __tt4 = _mm256_shuffle_ps(__t4,__t6,_MM_SHUFFLE(1,0,1,0));
+    __tt5 = _mm256_shuffle_ps(__t4,__t6,_MM_SHUFFLE(3,2,3,2));
+    __tt6 = _mm256_shuffle_ps(__t5,__t7,_MM_SHUFFLE(1,0,1,0));
+    __tt7 = _mm256_shuffle_ps(__t5,__t7,_MM_SHUFFLE(3,2,3,2));
+    row0 = _mm256_permute2f128_ps(__tt0, __tt4, 0x20);
+    row1 = _mm256_permute2f128_ps(__tt1, __tt5, 0x20);
+    row2 = _mm256_permute2f128_ps(__tt2, __tt6, 0x20);
+    row3 = _mm256_permute2f128_ps(__tt3, __tt7, 0x20);
+    row4 = _mm256_permute2f128_ps(__tt0, __tt4, 0x31);
+    row5 = _mm256_permute2f128_ps(__tt1, __tt5, 0x31);
+    row6 = _mm256_permute2f128_ps(__tt2, __tt6, 0x31);
+    row7 = _mm256_permute2f128_ps(__tt3, __tt7, 0x31);
+}
+
+inline __m256 hsum8x256_ps(__m256 &row0,
+                          __m256 &row1,
+                          __m256 &row2,
+                          __m256 &row3,
+                          __m256 &row4,
+                          __m256 &row5,
+                          __m256 &row6,
+                          __m256 &row7) {
+  transpose8_ps(row0, row1, row2, row3, row4, row5, row6, row7);
+  row0 = _mm256_add_ps(row0, row1);
+  row2 = _mm256_add_ps(row2, row3);
+  row4 = _mm256_add_ps(row4, row5);
+  row6 = _mm256_add_ps(row6, row7);
+
+  row0 = _mm256_add_ps(row0, row2);
+  row4 = _mm256_add_ps(row4, row6);
+
+  return _mm256_add_ps(row0, row4);
+}
+
+#else
+
+// Horizontally add elements of each __m256 type arguments at once
+// a : ( a7, a6, a5, a4, a3, a2, a1, a0 )
+// b : ( b7, b6, b5, b4, b3, b2, b1, b0 )
+// c : ( c7, c6, c5, c4, c3, c2, c1, c0 )
+// d : ( d7, d6, d5, d4, d3, d2, d1, d0 )
+// e : ( e7, e6, e5, e4, e3, e2, e1, e0 )
+// f : ( f7, f6, f5, f4, f3, f2, f1, f0 )
+// g : ( g7, g6, g5, g4, g3, g2, g1, g0 )
+// h : ( h7, h6, h5, h4, h3, h2, h1, h0 )
+// out  : ( hsum, gsum, fsum, esum, dsum, csum, bsum, asum )
+inline __m256 hsum8x256_ps(const __m256& a,
+                           const __m256& b,
+                           const __m256& c,
+                           const __m256& d,
+                           const __m256& e,
+                           const __m256& f,
+                           const __m256& g,
+                           const __m256& h) {
+  
+  // b3,b2,b1,b0, a3,a2,a1,a0
+  // b7,b6,b5,b4, a7,a6,a5,a4
+  // 
+  // d3,d2,d1,d0, c3,c2,c1,c0
+  // d7,d6,d5,d4, c7,c6,c5,c4
+  // 
+  // f3,f2,f1,f0, e3,e2,e1,e0
+  // f7,f6,f5,f4, e7,e6,e5,e4
+  // 
+  // h3,h2,h1,h0, g3,g2,g1,g0
+  // h7,h6,h5,h4, g7,g6,g5,g4
+  __m256 aaaabbbb1 = _mm256_permute2f128_ps(a, b, 0x20);
+  __m256 aaaabbbb2 = _mm256_permute2f128_ps(a, b, 0x31);
+  __m256 ccccdddd1 = _mm256_permute2f128_ps(c, d, 0x20);
+  __m256 ccccdddd2 = _mm256_permute2f128_ps(c, d, 0x31);
+  __m256 eeeeffff1 = _mm256_permute2f128_ps(e, f, 0x20);
+  __m256 eeeeffff2 = _mm256_permute2f128_ps(e, f, 0x31);
+  __m256 gggghhhh1 = _mm256_permute2f128_ps(g, h, 0x20);
+  __m256 gggghhhh2 = _mm256_permute2f128_ps(g, h, 0x31);
+  __m256 aaaabbbb = _mm256_add_ps(aaaabbbb1, aaaabbbb2);
+  __m256 ccccdddd = _mm256_add_ps(ccccdddd1, ccccdddd2);
+  __m256 eeeeffff = _mm256_add_ps(eeeeffff1, eeeeffff2);
+  __m256 gggghhhh = _mm256_add_ps(gggghhhh1, gggghhhh2);
+  
+  // b3,b2,b1,b0, a3,a2,a1,a0
+  // b7,b6,b5,b4, a7,a6,a5,a4
+  // b3,b2,b3,b2, a3,a2,a3,a2
+  // b7,b6,b7,b6, a7,a6,a7,a6
+  // 
+  // d3,d2,d1,d0, c3,c2,c1,c0
+  // d7,d6,d5,d4, c7,c6,c5,c4
+  // d3,d2,d3,d2, c3,c2,c3,c2
+  // d7,d6,d7,d6, c7,c6,c7,c6
+  // 
+  // f3,f2,f1,f0, e3,e2,e1,e0
+  // f7,f6,f5,f4, e7,e6,e5,e4
+  // f3,f2,f3,f2, e3,e2,e3,e2
+  // f7,f6,f7,f6, e7,e6,e7,e6
+  // 
+  // h3,h2,h1,h0, g3,g2,g1,g0
+  // h7,h6,h5,h4, g7,g6,g5,g4
+  // h3,h2,h3,h2, g3,g2,g3,g2
+  // h7,h6,h7,h6, g7,g6,g7,g6
+  aaaabbbb2 = _mm256_permute_ps(aaaabbbb, _MM_SHUFFLE(3, 2, 3, 2));
+  ccccdddd2 = _mm256_permute_ps(ccccdddd, _MM_SHUFFLE(3, 2, 3, 2));
+  eeeeffff2 = _mm256_permute_ps(eeeeffff, _MM_SHUFFLE(3, 2, 3, 2));
+  gggghhhh2 = _mm256_permute_ps(gggghhhh, _MM_SHUFFLE(3, 2, 3, 2));
+  aaaabbbb = _mm256_add_ps(aaaabbbb, aaaabbbb2);
+  ccccdddd = _mm256_add_ps(ccccdddd, ccccdddd2);
+  eeeeffff = _mm256_add_ps(eeeeffff, eeeeffff2);
+  gggghhhh = _mm256_add_ps(gggghhhh, gggghhhh2);
+  
+  // d1,d0,b1,b0, c1,c0,a1,a0
+  // d5,d4,b5,b4, c5,c4,a5,a4
+  // d3,d2,b3,b2, c3,c2,a3,a2
+  // d7,d6,b7,b6, c7,c6,a7,a6
+  // 
+  // h1,h0,f1,f0, g1,g0,e1,e0
+  // h5,h4,f5,f4, g5,g4,e5,e4
+  // h3,h2,f3,f2, g3,g2,e3,e2
+  // h7,h6,f7,f6, g7,g6,e7,e6
+  __m256 aaccbbdd = _mm256_castpd_ps(_mm256_unpacklo_pd(_mm256_castps_pd(aaaabbbb), _mm256_castps_pd(ccccdddd)));
+  __m256 eeggffhh = _mm256_castpd_ps(_mm256_unpacklo_pd(_mm256_castps_pd(eeeeffff), _mm256_castps_pd(gggghhhh)));
+  
+  // d1,d0,b1,b0, c1,c0,a1,a0
+  // d5,d4,b5,b4, c5,c4,a5,a4
+  // d3,d2,b3,b2, c3,c2,a3,a2
+  // d7,d6,b7,b6, c7,c6,a7,a6
+  // d0,d1,b0,b1, c0,c1,a0,a1
+  // d4,d5,b4,b5, c4,c5,a4,a5
+  // d2,d3,b2,b3, c2,c3,a2,a3
+  // d6,d7,b6,b7, c6,c7,a6,a7
+  // 
+  // h1,h0,f1,f0, g1,g0,e1,e0
+  // h5,h4,f5,f4, g5,g4,e5,e4
+  // h3,h2,f3,f2, g3,g2,e3,e2
+  // h7,h6,f7,f6, g7,g6,e7,e6
+  // h0,h1,f0,f1, g0,g1,e0,e1
+  // h4,h5,f4,f5, g4,g5,e4,e5
+  // h2,h3,f2,f3, g2,g3,e2,e3
+  // h6,h7,f6,f7, g6,g7,e6,e7
+  // 
+  // d,d,b,b, c,c,a,a
+  // h,h,f,f, g,g,e,e
+  __m256 aaccbbdd2 = _mm256_permute_ps(aaccbbdd, _MM_SHUFFLE(2, 3, 0, 1));
+  __m256 eeggffhh2 = _mm256_permute_ps(eeggffhh, _MM_SHUFFLE(2, 3, 0, 1));
+  aaccbbdd = _mm256_add_ps(aaccbbdd, aaccbbdd2);
+  eeggffhh = _mm256_add_ps(eeggffhh, eeggffhh2);
+
+  // d,d,b,b, c,c,a,a
+  // h,h,f,f, g,g,e,e
+  // 
+  // g,g,e,e, c,c,a,a
+  // h,h,f,f, d,d,b,b
+  __m256 aacceegg = _mm256_permute2f128_ps(aaccbbdd, eeggffhh, 0x20);
+  __m256 bbddffhh = _mm256_permute2f128_ps(aaccbbdd, eeggffhh, 0x31);
+
+  // h,g,f,e, d,c,b,a
+  __m256 abcdefgh = _mm256_blend_ps(aacceegg, bbddffhh, 0xAA /* 0b10101010 */);
+
+  return abcdefgh;
+}
+
+#endif
+
 inline __m128d hsum256_pd(__m256d x) {
   // hiDual = ( x3, x2 )
   const __m128d hiDual = _mm256_extractf128_pd(x, 1);
