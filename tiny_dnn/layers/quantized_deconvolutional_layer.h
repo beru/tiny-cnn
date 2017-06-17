@@ -379,6 +379,8 @@ class quantized_deconvolutional_layer : public layer {
   serial_size_t in_length(serial_size_t in_length,
                           serial_size_t window_size,
                           padding pad_type) const {
+    CNN_UNREFERENCED_PARAMETER(window_size);
+    CNN_UNREFERENCED_PARAMETER(pad_type);
     return in_length;
   }
 

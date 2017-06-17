@@ -84,7 +84,7 @@ void conv2d_op_internal(const tensor_t &prev_out,
                         const bool parallelize) {
   typedef typename vec_t::value_type float_t;
 
-  for_i(parallelize, prev_out.size(), [&](int sample) {
+  for_i(parallelize, prev_out.size(), [&](size_t sample) {
     // propagate delta to previous layer
     for (serial_size_t inc = 0; inc < params.in.depth_; inc++) {
       for (serial_size_t outc = 0; outc < params.out.depth_; outc++) {

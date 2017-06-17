@@ -1085,7 +1085,7 @@ inline std::vector<vec_t> image2vec(const float_t *data,
     (cols - sizepatch) * (rows - sizepatch) / (step * step),
     vec_t(sizepatch * sizepatch));
   for_i((cols - sizepatch) * (rows - sizepatch) / (step * step),
-        [&](int count) {
+        [&](size_t count) {
           const int j = step * (count / ((cols - sizepatch) / step));
           const int i = step * (count % ((cols - sizepatch) / step));
 

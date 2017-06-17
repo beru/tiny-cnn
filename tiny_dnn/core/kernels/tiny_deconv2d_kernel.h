@@ -19,7 +19,7 @@ inline void tiny_deconv2d_kernel(const deconv_params &params,
                                  const vec_t &bias,
                                  tensor_t &out,
                                  const bool layer_parallelize) {
-  for_i(layer_parallelize, in.size(), [&](int sample) {
+  for_i(layer_parallelize, in.size(), [&](size_t sample) {
     for (serial_size_t o = 0; o < params.out.depth_; o++) {
       for (serial_size_t inc = 0; inc < params.in.depth_; inc++) {
         if (!params.tbl.is_connected(o, inc)) continue;

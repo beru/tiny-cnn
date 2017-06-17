@@ -274,6 +274,7 @@ class layer : public node {
    * set input shape of a layer (only used internally while shape inferring)
    */
   virtual void set_in_shape(const shape3d &in_shape) {
+    CNN_UNREFERENCED_PARAMETER(in_shape);
     throw nn_error(
       "Can't set shape. Shape inferring not applicable for this "
       "layer (yet).");

@@ -18,7 +18,7 @@ inline void fully_connected_op_internal(const tensor_t &in_data,
                                         tensor_t &out_data,
                                         const fully_params &params,
                                         const bool layer_parallelize) {
-  for_i(layer_parallelize, in_data.size(), [&](int sample) {
+  for_i(layer_parallelize, in_data.size(), [&](size_t sample) {
     const vec_t &in = in_data[sample];
     vec_t &out      = out_data[sample];
 
