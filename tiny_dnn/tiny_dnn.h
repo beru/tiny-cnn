@@ -36,10 +36,9 @@
 #include "tiny_dnn/layers/quantized_deconvolutional_layer.h"
 #include "tiny_dnn/layers/recurrent_layer.h"
 #include "tiny_dnn/layers/slice_layer.h"
-
 #include "tiny_dnn/layers/cell.h"
 #include "tiny_dnn/layers/cells.h"
-
+#include "tiny_dnn/activations/asinh_layer.h"
 #include "tiny_dnn/activations/elu_layer.h"
 #include "tiny_dnn/activations/leaky_relu_layer.h"
 #include "tiny_dnn/activations/relu_layer.h"
@@ -132,6 +131,8 @@ using ave_unpool = tiny_dnn::average_unpooling_layer;
 namespace activation {
 
 using sigmoid = tiny_dnn::sigmoid_layer;
+
+using asinh = tiny_dnn::asinh_layer;
 
 using tanh = tiny_dnn::tanh_layer;
 
